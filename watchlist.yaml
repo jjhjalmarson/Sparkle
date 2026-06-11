@@ -25,3 +25,4 @@ hot_alert:
   min_confidence: 0.7
 
 ntfy_topic: "sketchhound-rl5c0ohzq9yjtdvw8fs6i41g2p73buae"
+feed_url: "https://jjhjalmarson.github.io/Sparkle/"

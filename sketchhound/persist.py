@@ -274,6 +274,17 @@ def last_run(conn: sqlite3.Connection) -> RunStats | None:
     )
 
 
+def unalerted_hot(conn: sqlite3.Connection) -> list[Listing]:
+    """Hot listings whose alert hasn't succeeded yet — the push queue.
+    Driven off the DB so a failed/rate-limited POST retries next run even
+    though the listing is no longer 'newly' hot."""
+    rows = conn.execute(
+        "SELECT * FROM listings WHERE went_hot_at IS NOT NULL AND alerted_at IS NULL "
+        "ORDER BY confidence DESC",
+    ).fetchall()
+    return [_row_to_listing(r) for r in rows]
+
+
 def total_vision_calls(conn: sqlite3.Connection) -> int:
     """Vision calls across all runs ever. Zero → still in initial backfill."""
     row = conn.execute("SELECT COALESCE(SUM(vision_call_count), 0) FROM runs").fetchone()

@@ -163,7 +163,9 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         stats.errors.append(f"publish: {exc}")
 
-    sent, alert_errors = push_alerts.push_hot_alerts(conn, newly_hot, watchlist.ntfy_topic, now)
+    sent, alert_errors = push_alerts.push_hot_alerts(
+        conn, watchlist.ntfy_topic, now, feed_url=watchlist.feed_url
+    )
     stats.errors.extend(alert_errors)
     if sent:
         print(f"sent {sent} hot alert(s) to ntfy")

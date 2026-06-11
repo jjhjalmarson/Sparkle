@@ -54,6 +54,9 @@ texture, or a too-clean board are all red flags. NEVER inflate attribution:
 and far more useful than a guessed name. attribution_confidence reflects the
 evidence in THESE images, not market hope.
 
+"confidence" is the probability that this IS an original costume design
+sketch — a confident "no" means confidence near 0, not near 1.
+
 Respond with ONLY a JSON object, no prose, no markdown fences:
 {
   "is_costume_design_sketch": true/false,

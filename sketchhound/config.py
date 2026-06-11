@@ -44,6 +44,7 @@ class Watchlist:
     negative_keywords: list[str] = field(default_factory=list)
     hot_alert: HotAlertConfig = field(default_factory=HotAlertConfig)
     ntfy_topic: str = ""
+    feed_url: str = ""  # public Pages URL; Click target for digest alerts
 
 
 def load_watchlist(path: Path = DEFAULT_WATCHLIST) -> Watchlist:
@@ -58,6 +59,7 @@ def load_watchlist(path: Path = DEFAULT_WATCHLIST) -> Watchlist:
             min_confidence=float(hot.get("min_confidence", 0.7)),
         ),
         ntfy_topic=raw.get("ntfy_topic", ""),
+        feed_url=raw.get("feed_url", ""),
     )
 
 
