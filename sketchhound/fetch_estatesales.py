@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 from .http_util import request_with_retry
 
 SEARCH_URL = "https://www.estatesales.net/api/search-details"
-PAGE_SIZE = 50
-MAX_RESULTS_PER_QUERY = 200
+PAGE_SIZE = 25
+MAX_RESULTS_PER_QUERY = 50
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; SketchHound/1.0; collector research bot)",
