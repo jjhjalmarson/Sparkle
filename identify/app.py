@@ -400,6 +400,12 @@ def _dashboard_data() -> dict | None:
 # Routes
 # ---------------------------------------------------------------------------
 
+@app.route("/healthz")
+def healthz():
+    """Deployed revision, for verifying what's actually live."""
+    return jsonify({"rev": os.environ.get("RENDER_GIT_COMMIT", "unknown")[:7]})
+
+
 @app.route("/")
 def index():
     return render_template("identify.html",
