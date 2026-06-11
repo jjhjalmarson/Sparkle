@@ -1,0 +1,8 @@
+# NOTE: data/sketchhound.db is committed by design (state lives in the repo).
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.env
+.ebay_token.json

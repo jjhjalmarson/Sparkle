@@ -1,0 +1,27 @@
+# SketchHound tuning surface. This is the ONLY file the collector (or JJ on his
+# behalf) edits to tune behavior. Everything else is code.
+
+artist_queries:        # Haiku-gated
+  - "Edith Head sketch"
+  - "Bob Mackie sketch"
+  - "Travilla costume"
+  - "Helen Rose costume sketch"
+  - "Adrian gown sketch"
+  - "Walter Plunkett"
+  - "Irene Sharaff"
+  - "Theadora Van Runkle"
+
+generic_queries:       # straight to vision
+  - "vintage costume sketch"
+  - "Hollywood costume design"
+  - "movie wardrobe sketch"
+  - "studio fashion illustration gouache"
+  - "costume design original art"
+
+negative_keywords: ["print", "reproduction", "repro", "poster", "giclee", "digital", "pattern", "cosplay"]
+
+hot_alert:
+  max_price: 2000        # USD; tune with friend
+  min_confidence: 0.7
+
+ntfy_topic: "sketchhound-rl5c0ohzq9yjtdvw8fs6i41g2p73buae"
