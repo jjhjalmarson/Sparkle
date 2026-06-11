@@ -106,6 +106,21 @@ def test_score_batch_respects_cap_and_isolates_failures():
     assert listings[3].stage_reached != Stage.VISION_SCORED  # beyond cap, untouched
 
 
+def test_on_scored_fires_per_success_for_incremental_persistence():
+    listings = [make_listing() for _ in range(3)]
+    listings[1].image_urls = []  # fails: no images
+    client = FakeAnthropic([vision_json(), vision_json()])
+    saved = []
+
+    score_batch(listings, client, cap=3, fetch_image=fetch_image, on_scored=saved.append)
+
+    assert [l.source_listing_id for l in saved] == [
+        listings[0].source_listing_id,
+        listings[2].source_listing_id,
+    ]
+    assert all(l.stage_reached == Stage.VISION_SCORED for l in saved)
+
+
 def test_backfill_cap_drains_over_runs(conn):
     """Acceptance: first-run flood → exactly BACKFILL_VISION_CAP vision calls,
     remainder stays queued for later runs."""

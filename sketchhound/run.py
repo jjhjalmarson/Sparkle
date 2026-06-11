@@ -104,10 +104,13 @@ def gate_and_score(
 
     queue = persist.pending_vision(conn, limit=BACKFILL_VISION_CAP)
     scored, cost, calls, errors = vision_score.score_batch(
-        queue, anthropic_client, cap=BACKFILL_VISION_CAP, fetch_image=fetch_image
+        queue,
+        anthropic_client,
+        cap=BACKFILL_VISION_CAP,
+        fetch_image=fetch_image,
+        # Persist as we go: a mid-batch crash loses at most one paid call.
+        on_scored=lambda listing: persist.update_listing(conn, listing),
     )
-    for listing in scored:
-        persist.update_listing(conn, listing)
     stats.vision_call_count += calls
     stats.est_cost_usd += cost
     stats.errors.extend(errors)

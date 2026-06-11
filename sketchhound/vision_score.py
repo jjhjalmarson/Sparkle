@@ -207,9 +207,14 @@ def score_batch(
     anthropic_client,
     cap: int,
     fetch_image=None,
+    on_scored=None,
 ) -> tuple[list[Listing], float, int, list[str]]:
     """Score up to `cap` listings (callers pass the backfill-capped queue and
     apply the abort guard before calling).
+
+    `on_scored(listing)` fires immediately after each successful score so the
+    caller can persist incrementally — a crash or job timeout mid-batch then
+    loses at most one paid call, not the whole batch.
 
     Returns (scored listings, total estimated cost, call count, errors).
     Failed listings stay GATE_SURVIVOR and drain on a later run.
@@ -234,5 +239,7 @@ def score_batch(
         listing.confidence = result.confidence
         listing.attributed_artist = result.attributed_artist
         listing.stage_reached = Stage.VISION_SCORED
+        if on_scored is not None:
+            on_scored(listing)
         scored.append(listing)
     return scored, total_cost, calls, errors

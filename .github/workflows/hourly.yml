@@ -18,7 +18,8 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Backfill runs do up to 150 serial vision calls — give them headroom.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +40,10 @@ jobs:
         run: python -m sketchhound.run
 
       - name: Commit state and page
+        # always(): if the pipeline fails or times out mid-run, whatever was
+        # already scored and persisted still gets committed — paid vision
+        # results are never thrown away.
+        if: always()
         run: |
           git config user.name "sketchhound-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
