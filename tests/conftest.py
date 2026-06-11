@@ -18,6 +18,12 @@ from sketchhound.models import Listing, ListingFormat, Stage
 NOW = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def no_backoff_sleep(monkeypatch):
+    """Retry backoff is real in prod, instant in tests."""
+    monkeypatch.setattr("sketchhound.http_util.time.sleep", lambda _: None)
+
+
 @pytest.fixture
 def conn():
     c = persist.connect(":memory:")

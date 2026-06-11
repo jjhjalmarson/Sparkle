@@ -18,7 +18,7 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, dedup, fetch_ebay, gate, normalize, persist, publish_page, vision_score
+from . import config, dedup, fetch_ebay, gate, normalize, persist, publish_page, push_alerts, vision_score
 from .config import ABORT_NEW_SURVIVORS, BACKFILL_VISION_CAP, Secrets, Watchlist, load_watchlist
 from .models import Listing, RunStats
 
@@ -156,7 +156,10 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         stats.errors.append(f"publish: {exc}")
 
-    # Build step 5: ntfy push for newly_hot.
+    sent, alert_errors = push_alerts.push_hot_alerts(conn, newly_hot, watchlist.ntfy_topic, now)
+    stats.errors.extend(alert_errors)
+    if sent:
+        print(f"sent {sent} hot alert(s) to ntfy")
 
     persist.record_run(conn, stats)
 
