@@ -18,7 +18,7 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, dedup, fetch_ebay, gate, normalize, persist, publish_page, push_alerts, vision_score
+from . import config, dedup, fetch_ebay, fetch_estatesales, gate, normalize, persist, publish_page, push_alerts, vision_score
 from .config import ABORT_NEW_SURVIVORS, BACKFILL_VISION_CAP, Secrets, Watchlist, load_watchlist
 from .models import Listing, RunStats
 
@@ -64,6 +64,23 @@ def fetch_and_dedup(
             if listing.source_listing_id not in kind_by_id:
                 kind_by_id[listing.source_listing_id] = kind
                 listings.append(listing)
+
+    for kind, queries in (("artist", watchlist.artist_queries), ("generic", watchlist.generic_queries)):
+        for query in queries:
+            try:
+                lots = fetch_estatesales.search(query)
+                stats.fetched_count += len(lots)
+                for raw in lots:
+                    try:
+                        listing = normalize.normalize_estatesales_lot(raw)
+                    except Exception as exc:
+                        stats.errors.append(f"normalize estatesales {raw.get('lot_id', '?')}: {exc}")
+                        continue
+                    if listing.source_listing_id not in kind_by_id:
+                        kind_by_id[listing.source_listing_id] = kind
+                        listings.append(listing)
+            except Exception as exc:
+                stats.errors.append(f"fetch estatesales {kind} query '{query}': {exc}")
 
     new_listings = dedup.dedup(conn, listings, now)
     stats.new_count = len(new_listings)

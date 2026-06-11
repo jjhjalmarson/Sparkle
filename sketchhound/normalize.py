@@ -1,4 +1,4 @@
-"""Raw eBay item_summary dicts → the single Listing schema."""
+"""Raw item dicts from eBay and estatesales.net → the single Listing schema."""
 
 from __future__ import annotations
 
@@ -47,6 +47,26 @@ def _parse_images(raw: dict) -> list[str]:
         if url and url not in urls:
             urls.append(url)
     return urls
+
+
+def normalize_estatesales_lot(raw: dict) -> Listing:
+    """Map one extracted estatesales.net lot dict to a Listing.
+
+    Price is not available at this level; lots land in attributed/probable
+    sections and are never Hot (Hot requires BIN + price).
+    """
+    return Listing(
+        source="estatesales",
+        source_listing_id=raw["lot_id"],
+        url=raw["lot_url"],
+        title=raw["title"],
+        description_snippet=raw.get("org_name") or None,
+        price_value=None,
+        price_currency=None,
+        listing_format=ListingFormat.AUCTION,
+        end_time=raw.get("end_time"),
+        image_urls=[u for u in [raw.get("image_url"), raw.get("thumbnail_url")] if u],
+    )
 
 
 def normalize_ebay_item(raw: dict) -> Listing:
