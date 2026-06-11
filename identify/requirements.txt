@@ -1,0 +1,4 @@
+flask>=3.0
+anthropic>=0.49
+Pillow>=10.0
+gunicorn>=22.0
