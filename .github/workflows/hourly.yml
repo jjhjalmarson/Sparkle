@@ -1,0 +1,51 @@
+name: SketchHound hourly run
+
+on:
+  schedule:
+    - cron: "7 * * * *" # offset from :00 — top-of-hour cron slots are congested and get delayed
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+# Never let two runs interleave commits; queue instead of cancel so a long
+# backfill run finishes.
+concurrency:
+  group: sketchhound-run
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: pip install .
+
+      - name: Run pipeline
+        env:
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m sketchhound.run
+
+      - name: Commit state and page
+        run: |
+          git config user.name "sketchhound-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/ docs/
+          if git diff --cached --quiet; then
+            echo "no changes to commit"
+          else
+            git commit -m "Hourly run $(date -u +'%Y-%m-%d %H:%M') UTC"
+            git pull --rebase
+            git push
+          fi
