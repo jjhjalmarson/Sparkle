@@ -5,7 +5,9 @@ services:
     plan: free
     rootDir: identify
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    # Provenance runs up to 6 server-side web searches per request — well past
+    # gunicorn's default 30s worker timeout.
+    startCommand: gunicorn app:app --timeout 300
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
