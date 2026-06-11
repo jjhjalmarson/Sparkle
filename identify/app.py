@@ -354,10 +354,38 @@ STAGE_LABELS = {
 }
 
 
+DB_RAW_URL = "https://raw.githubusercontent.com/jjhjalmarson/Sparkle/master/data/sketchhound.db"
+_DB_CACHE = Path(tempfile.gettempdir()) / "sketchhound-db-cache.db"
+DB_CACHE_TTL_SECONDS = 600
+
+
+def _freshest_db() -> Path | None:
+    """The hourly pipeline commits a new DB to GitHub, but this service only
+    gets a fresh checkout on deploy. Pull from GitHub raw (10-min cache) so
+    the dashboard stays current without redeploying; fall back to the
+    checkout copy, then to nothing."""
+    try:
+        if not _DB_CACHE.exists() or time.time() - _DB_CACHE.stat().st_mtime > DB_CACHE_TTL_SECONDS:
+            import urllib.request
+
+            tmp = _DB_CACHE.with_suffix(".tmp")
+            with urllib.request.urlopen(DB_RAW_URL, timeout=30) as resp:
+                tmp.write_bytes(resp.read())
+            os.replace(tmp, _DB_CACHE)
+    except Exception:
+        pass  # network hiccup → serve whatever we already have
+    if _DB_CACHE.exists():
+        return _DB_CACHE
+    if DB_PATH.exists():
+        return DB_PATH
+    return None
+
+
 def _open_db() -> sqlite3.Connection | None:
-    if not DB_PATH.exists():
+    db = _freshest_db()
+    if db is None:
         return None
-    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
