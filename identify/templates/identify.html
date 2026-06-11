@@ -338,15 +338,30 @@ async function fetchProvenance(vision, notes) {
   bodyEl.style.display = 'none';
   errEl.style.display = 'none';
 
+  // The search runs 2-6 minutes server-side as a background job; start it,
+  // then poll until it finishes. A held-open request would be killed by
+  // worker/proxy timeouts long before the searches complete.
   let data;
   try {
-    const res = await fetch('/provenance', {
+    const startRes = await fetch('/provenance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ vision, notes }),
     });
-    data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Provenance search failed');
+    const started = await startRes.json();
+    if (!startRes.ok) throw new Error(started.error || 'Provenance search failed');
+
+    const deadline = Date.now() + 8 * 60 * 1000;
+    while (true) {
+      await new Promise(function (r) { setTimeout(r, 4000); });
+      if (reqId !== provRequestId) return; // user reset mid-flight
+      if (Date.now() > deadline) throw new Error('search timed out');
+      const pollRes = await fetch('/provenance/' + started.job_id);
+      const meta = await pollRes.json();
+      if (!pollRes.ok) throw new Error(meta.error || 'lost track of the search');
+      if (meta.status === 'error') throw new Error(meta.error || 'search failed');
+      if (meta.status === 'done') { data = meta.result; break; }
+    }
   } catch (err) {
     if (reqId !== provRequestId) return; // user reset mid-flight
     loadingEl.style.display = 'none';

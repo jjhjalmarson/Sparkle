@@ -10,7 +10,12 @@ import base64
 import io
 import json
 import os
+import re
+import secrets
 import sqlite3
+import tempfile
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -138,6 +143,51 @@ PROVENANCE_KEYS = {
     "contradicting_evidence", "comparable_sales", "sources",
     "provenance_confidence", "summary",
 }
+
+# ---------------------------------------------------------------------------
+# Background job store (disk-persisted — gunicorn workers can die at any time,
+# so job state must never live in an in-memory dict)
+# ---------------------------------------------------------------------------
+
+_JOB_DIR = Path(os.environ.get("DATA_DIR", "").strip() or tempfile.gettempdir()) / "provenance_jobs"
+_JOB_ID_RE = re.compile(r"^[a-f0-9]{12}$")  # job ids appear in file paths
+JOB_STALL_SECONDS = 8 * 60  # worker restarted mid-job → report instead of spinning forever
+
+
+def _job_path(job_id: str) -> Path:
+    return _JOB_DIR / f"{job_id}.json"
+
+
+def _write_job(job_id: str, meta: dict) -> None:
+    _JOB_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = _job_path(job_id).with_suffix(".tmp")
+    tmp.write_text(json.dumps(meta), encoding="utf-8")
+    os.replace(tmp, _job_path(job_id))
+
+
+def _read_job(job_id: str) -> dict | None:
+    try:
+        return json.loads(_job_path(job_id).read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def _cleanup_old_jobs() -> None:
+    cutoff = time.time() - 3600
+    try:
+        for path in _JOB_DIR.iterdir():
+            if path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+    except FileNotFoundError:
+        pass
+
+
+def _run_provenance_job(job_id: str, vision: dict, notes: str) -> None:
+    try:
+        result = provenance_search(vision, notes)
+        _write_job(job_id, {"status": "done", "result": result})
+    except Exception as exc:
+        _write_job(job_id, {"status": "error", "error": str(exc)})
 
 
 def _prepare_image(raw: bytes) -> bytes:
@@ -453,7 +503,10 @@ def analyze_endpoint():
 
 
 @app.route("/provenance", methods=["POST"])
-def provenance_endpoint():
+def provenance_start():
+    """Kick off the archive search as a background job and return immediately.
+    The search runs 2-6 minutes (up to 6 server-side web searches) — far past
+    any sane worker/proxy timeout, so the browser polls instead of waiting."""
     payload = request.get_json(silent=True)
     if not payload or not isinstance(payload.get("vision"), dict):
         return jsonify({"error": "Send JSON with a 'vision' object from /analyze."}), 400
@@ -462,13 +515,28 @@ def provenance_endpoint():
     if not vision.get("is_costume_design_sketch"):
         return jsonify({"error": "Provenance research only runs on identified sketches."}), 400
 
-    notes = payload.get("notes", "") or ""
-    try:
-        result = provenance_search(vision, notes)
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    _cleanup_old_jobs()
+    job_id = secrets.token_hex(6)
+    _write_job(job_id, {"status": "running", "started_at": time.time()})
+    thread = threading.Thread(
+        target=_run_provenance_job,
+        args=(job_id, vision, payload.get("notes", "") or ""),
+        daemon=True,
+    )
+    thread.start()
+    return jsonify({"job_id": job_id}), 202
 
-    return jsonify(result)
+
+@app.route("/provenance/<job_id>")
+def provenance_status(job_id: str):
+    if not _JOB_ID_RE.match(job_id):
+        return jsonify({"error": "Invalid job id."}), 400
+    meta = _read_job(job_id)
+    if meta is None:
+        return jsonify({"error": "Unknown or expired job."}), 404
+    if meta.get("status") == "running" and time.time() - meta.get("started_at", 0) > JOB_STALL_SECONDS:
+        return jsonify({"status": "error", "error": "Search stalled (server restarted mid-job). Try again."})
+    return jsonify(meta)
 
 
 if __name__ == "__main__":
