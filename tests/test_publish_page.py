@@ -8,7 +8,7 @@ from sketchhound.models import ListingFormat, RunStats, Stage, VisionResult
 
 from .conftest import NOW, make_listing, persisted
 
-WATCHLIST = Watchlist(hot_alert=HotAlertConfig(max_price=2000, min_confidence=0.7))
+WATCHLIST = Watchlist(hot_alert=HotAlertConfig(min_price=500, min_confidence=0.7))
 
 
 def scored(
@@ -50,22 +50,23 @@ def section_of(sections, listing):
 
 
 def test_hot_criteria(conn):
-    hot = scored(conn, conf=0.8)
-    too_old = scored(conn, conf=0.8, seen_hours_ago=30)
-    too_pricey = scored(conn, conf=0.9, price=5000.0)
-    low_conf = scored(conn, conf=0.6)
-    auction = scored(conn, conf=0.9, fmt=ListingFormat.AUCTION)
+    """Hot = high-priced: BIN, confident, at or above min_price, fresh."""
+    hot = scored(conn, conf=0.8, price=1200.0)
+    too_old = scored(conn, conf=0.8, price=1200.0, seen_hours_ago=30)
+    too_cheap = scored(conn, conf=0.9, price=100.0)
+    low_conf = scored(conn, conf=0.6, price=1200.0)
+    auction = scored(conn, conf=0.9, price=1200.0, fmt=ListingFormat.AUCTION)
 
     sections = publish_page.select_sections(conn, WATCHLIST, NOW)
     assert section_of(sections, hot) == "hot"
     assert section_of(sections, too_old) == "probable"
-    assert section_of(sections, too_pricey) == "probable"
+    assert section_of(sections, too_cheap) == "probable"
     assert section_of(sections, low_conf) == "probable"
     assert section_of(sections, auction) == "probable"
 
 
 def test_each_listing_appears_once(conn):
-    star = scored(conn, conf=0.9, artist="Edith Head", attr_conf=0.8)  # hot AND attributable
+    star = scored(conn, conf=0.9, price=1500.0, artist="Edith Head", attr_conf=0.8)  # hot AND attributable
     sections = publish_page.select_sections(conn, WATCHLIST, NOW)
     assert section_of(sections, star) == "hot"
     assert sum(len(v) for v in sections.values()) == 1
@@ -109,9 +110,9 @@ def test_ended_listings_leave_the_feed(conn):
 
 
 def test_relist_suppressed_unless_price_dropped(conn):
-    original = scored(conn, conf=0.9, price=500.0)
-    big_drop = scored(conn, conf=0.9, price=300.0, stage=Stage.RELISTED, relisted_from=original.id)
-    small_drop = scored(conn, conf=0.9, price=450.0, stage=Stage.RELISTED, relisted_from=original.id)
+    original = scored(conn, conf=0.9, price=2000.0)
+    big_drop = scored(conn, conf=0.9, price=1400.0, stage=Stage.RELISTED, relisted_from=original.id)
+    small_drop = scored(conn, conf=0.9, price=1800.0, stage=Stage.RELISTED, relisted_from=original.id)
 
     sections = publish_page.select_sections(conn, WATCHLIST, NOW)
     assert section_of(sections, big_drop) == "hot"      # >20% drop resurfaces
@@ -119,7 +120,7 @@ def test_relist_suppressed_unless_price_dropped(conn):
 
 
 def test_mark_newly_hot_stamps_once(conn):
-    listing = scored(conn, conf=0.8)
+    listing = scored(conn, conf=0.8, price=900.0)
     sections = publish_page.select_sections(conn, WATCHLIST, NOW)
 
     first = publish_page.mark_newly_hot(conn, sections["hot"], NOW)
@@ -133,7 +134,7 @@ def test_mark_newly_hot_stamps_once(conn):
 
 
 def test_render_full_page(conn):
-    hot = scored(conn, conf=0.8, artist="Edith Head", attr_conf=0.9, title="Edith Head Paramount gouache")
+    hot = scored(conn, conf=0.8, price=1450.0, artist="Edith Head", attr_conf=0.9, title="Edith Head Paramount gouache")
     stats = RunStats(started_at=NOW, finished_at=NOW, fetched_count=120, new_count=4, vision_call_count=3)
 
     sections = publish_page.select_sections(conn, WATCHLIST, NOW)
@@ -148,6 +149,27 @@ def test_render_full_page(conn):
     assert "120 fetched" in html
     assert "viewport" in html  # mobile meta present
     assert "class=\"banner\"" not in html  # no banner when none passed
+
+
+def test_render_sort_filter_controls(conn):
+    scored(conn, conf=0.8, price=1450.0, artist="Edith Head", attr_conf=0.9)
+    scored(conn, conf=0.6, price=85.0, fmt=ListingFormat.AUCTION)
+    stats = RunStats(started_at=NOW, finished_at=NOW)
+
+    sections = publish_page.select_sections(conn, WATCHLIST, NOW)
+    html = publish_page.render(sections, stats, month_spend=0.0, banner=None)
+
+    # Controls present with all four sort modes and the artist filter.
+    assert 'id="sort"' in html and 'id="artist-filter"' in html
+    assert 'value="newest"' in html
+    assert 'value="price"' in html
+    assert 'value="artist"' in html
+    assert '<option value="edith head">Edith Head</option>' in html
+    # Cards carry the data attributes the script sorts on.
+    assert 'data-price="1450.0"' in html
+    assert 'data-artist="edith head"' in html
+    assert 'data-artist="unknown"' in html
+    assert f'data-seen="{(NOW - timedelta(hours=1)).isoformat()}"' in html
 
 
 def test_render_banner_and_empty_sections(conn):

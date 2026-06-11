@@ -21,7 +21,7 @@ generic_queries:       # straight to vision
 negative_keywords: ["print", "reproduction", "repro", "poster", "giclee", "digital", "pattern", "cosplay"]
 
 hot_alert:
-  max_price: 2000        # USD; tune with friend
+  min_price: 500         # USD; hot = high-priced significant pieces
   min_confidence: 0.7
 
 ntfy_topic: "sketchhound-rl5c0ohzq9yjtdvw8fs6i41g2p73buae"

@@ -33,7 +33,9 @@ DEFAULT_SITE_DIR = Path("docs")  # GitHub Pages serves from /docs
 
 @dataclass
 class HotAlertConfig:
-    max_price: float = 2000.0
+    # Hot = high-priced: collector wants the significant pieces surfaced,
+    # not budget caps. Listings at or above min_price qualify.
+    min_price: float = 500.0
     min_confidence: float = 0.7
 
 
@@ -55,7 +57,7 @@ def load_watchlist(path: Path = DEFAULT_WATCHLIST) -> Watchlist:
         generic_queries=raw.get("generic_queries", []),
         negative_keywords=raw.get("negative_keywords", []),
         hot_alert=HotAlertConfig(
-            max_price=float(hot.get("max_price", 2000)),
+            min_price=float(hot.get("min_price", 500)),
             min_confidence=float(hot.get("min_confidence", 0.7)),
         ),
         ntfy_topic=raw.get("ntfy_topic", ""),

@@ -142,7 +142,7 @@ def test_end_to_end_newly_hot_to_alert(conn):
     from sketchhound.models import VisionResult
 
     responses.add(responses.POST, NTFY_URL, status=200)
-    watchlist = Watchlist(hot_alert=HotAlertConfig(max_price=2000, min_confidence=0.7))
+    watchlist = Watchlist(hot_alert=HotAlertConfig(min_price=500, min_confidence=0.7))
 
     listing = make_listing(price=900.0)
     listing.end_time = NOW + timedelta(days=2)

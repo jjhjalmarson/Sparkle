@@ -62,7 +62,7 @@ def is_hot(listing: Listing, watchlist: Watchlist, now: datetime) -> bool:
         listing.listing_format is ListingFormat.BUY_IT_NOW
         and (listing.confidence or 0) >= watchlist.hot_alert.min_confidence
         and listing.price_value is not None
-        and listing.price_value <= watchlist.hot_alert.max_price
+        and listing.price_value >= watchlist.hot_alert.min_price
         and listing.first_seen_at is not None
         and now - listing.first_seen_at < timedelta(hours=HOT_LISTED_WITHIN_HOURS)
     )
@@ -183,6 +183,14 @@ PAGE_TEMPLATE = Template(
   .banner { background: #b3261e; color: #fff; border-radius: 12px;
             border: 2px dashed #ffd9d4;
             padding: 12px 14px; margin: 14px 0; font-size: .95rem; }
+  .controls { display: flex; gap: 8px; margin: 14px 0 2px; }
+  .controls select { flex: 1; min-width: 0; font-size: .85rem; padding: 7px 8px;
+            border: 2px solid var(--edge); border-radius: 10px;
+            background: var(--card); color: var(--ink);
+            font-family: inherit; }
+  /* Explicit sorts flatten the feed into one ranked list */
+  body.flat section h2, body.flat .empty { display: none; }
+  body.flat .card { --accent: var(--pink); }
   section h2 { font-family: var(--display); font-weight: 400; font-size: 1.35rem;
        margin: 28px 0 10px; padding-bottom: 4px;
        border-bottom: 3px dotted var(--accent, var(--edge));
@@ -226,12 +234,28 @@ PAGE_TEMPLATE = Template(
 
 {% if banner %}<div class="banner">⚠ {{ banner }}</div>{% endif %}
 
+<div class="controls" id="controls" hidden>
+  <select id="sort" aria-label="Sort listings">
+    <option value="default">Sort: featured</option>
+    <option value="newest">Date added: newest</option>
+    <option value="price">Price: high to low</option>
+    <option value="artist">Artist: A–Z</option>
+  </select>
+  <select id="artist-filter" aria-label="Filter by artist">
+    <option value="">All artists</option>
+    {% for artist in artists %}<option value="{{ artist|lower }}">{{ artist }}</option>{% endfor %}
+  </select>
+</div>
+
 {% for key, title in section_titles.items() %}
 <section class="s-{{ key }}">
   <h2>{{ title }}</h2>
   {% if not sections[key] %}<p class="empty">Nothing right now.</p>{% endif %}
   {% for l in sections[key] %}
-  <article class="card">
+  <article class="card" data-idx="{{ loop.index }}" data-section="{{ key }}"
+           data-price="{{ l.price_value if l.price_value is not none else 0 }}"
+           data-artist="{{ (l.attributed_artist or 'unknown')|lower }}"
+           data-seen="{{ l.first_seen_at.isoformat() if l.first_seen_at else '' }}">
     {% if l.image_urls %}<a class="thumb" href="{{ l.url }}"><img src="{{ l.image_urls[0] }}" alt="" loading="lazy"></a>{% endif %}
     <div class="body">
       <p class="title"><a href="{{ l.url }}">{{ l.title }}</a></p>
@@ -264,6 +288,65 @@ PAGE_TEMPLATE = Template(
   Estimated model spend this month: ${{ "%.2f"|format(month_spend) }}<br>
   Made with ✨ for Glitterville Studios
 </footer>
+
+<script>
+// Progressive enhancement only — the feed reads fine without JS.
+(function () {
+  var controls = document.getElementById('controls');
+  controls.hidden = false;
+  var sortEl = document.getElementById('sort');
+  var artistEl = document.getElementById('artist-filter');
+
+  var sectionEls = {};
+  document.querySelectorAll('section').forEach(function (s) {
+    var card = s.querySelector('.card');
+    // Map each section element by the key its cards carry.
+    s.querySelectorAll('.card').forEach(function (c) { sectionEls[c.dataset.section] = s; });
+    if (!s.dataset.first && card) s.dataset.first = card.dataset.section;
+  });
+  var firstSection = document.querySelector('section');
+  var allCards = Array.prototype.slice.call(document.querySelectorAll('.card'));
+
+  var comparators = {
+    newest: function (a, b) { return (b.dataset.seen || '').localeCompare(a.dataset.seen || ''); },
+    price: function (a, b) { return +b.dataset.price - +a.dataset.price; },
+    artist: function (a, b) {
+      var x = a.dataset.artist, y = b.dataset.artist;
+      if (x === 'unknown' && y !== 'unknown') return 1;   // unknowns sink
+      if (y === 'unknown' && x !== 'unknown') return -1;
+      return x.localeCompare(y) || (+b.dataset.price - +a.dataset.price);
+    }
+  };
+
+  function apply() {
+    var artist = artistEl.value;
+    var mode = sortEl.value;
+    allCards.forEach(function (card) {
+      card.style.display = (!artist || card.dataset.artist === artist) ? '' : 'none';
+    });
+    if (mode === 'default') {
+      // Restore the curated sections in their original order.
+      document.body.classList.remove('flat');
+      allCards
+        .slice()
+        .sort(function (a, b) { return +a.dataset.idx - +b.dataset.idx; })
+        .forEach(function (card) {
+          var home = sectionEls[card.dataset.section];
+          if (home) home.appendChild(card);
+        });
+    } else {
+      // One globally ranked list; section headers hide via body.flat.
+      document.body.classList.add('flat');
+      allCards.slice().sort(comparators[mode]).forEach(function (card) {
+        firstSection.appendChild(card);
+      });
+    }
+  }
+
+  sortEl.addEventListener('change', apply);
+  artistEl.addEventListener('change', apply);
+})();
+</script>
 </body>
 </html>
 """
@@ -276,12 +359,22 @@ def render(
     month_spend: float,
     banner: str | None,
 ) -> str:
+    artists = sorted(
+        {
+            listing.attributed_artist
+            for listings in sections.values()
+            for listing in listings
+            if listing.attributed_artist and listing.attributed_artist.lower() != "unknown"
+        },
+        key=str.lower,
+    )
     return PAGE_TEMPLATE.render(
         sections=sections,
         section_titles=SECTION_TITLES,
         stats=stats,
         month_spend=month_spend,
         banner=banner,
+        artists=artists,
     )
 
 

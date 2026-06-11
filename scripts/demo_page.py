@@ -18,7 +18,7 @@ from sketchhound.config import HotAlertConfig, Watchlist
 from sketchhound.models import Listing, ListingFormat, RunStats, Stage, VisionResult
 
 NOW = datetime.now(timezone.utc)
-WATCHLIST = Watchlist(hot_alert=HotAlertConfig(max_price=2000, min_confidence=0.7))
+WATCHLIST = Watchlist(hot_alert=HotAlertConfig(min_price=500, min_confidence=0.7))
 
 
 def fixture(
@@ -76,7 +76,7 @@ def main() -> int:
                 artist="Edith Head", attr_conf=0.85, price=1450,
                 signals=["signature lower right", "Paramount wardrobe stamp", "actress name annotation"]),
         fixture(2, "Vintage Hollywood wardrobe drawing — unmarked studio piece", conf=0.78,
-                price=325, seen_hours_ago=5),
+                price=825, seen_hours_ago=5),
         fixture(3, "Bob Mackie signed gown design, Carol Burnett Show era", conf=0.88,
                 artist="Bob Mackie", attr_conf=0.74, fmt=ListingFormat.AUCTION,
                 price=620, seen_hours_ago=40,
