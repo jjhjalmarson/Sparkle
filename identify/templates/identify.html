@@ -351,14 +351,24 @@ async function fetchProvenance(vision, notes) {
     const started = await startRes.json();
     if (!startRes.ok) throw new Error(started.error || 'Provenance search failed');
 
-    const deadline = Date.now() + 15 * 60 * 1000;
+    // No client-side deadline: the server's stall detector is the single
+    // judge of a dead job. A browser-side timer once discarded a result
+    // that completed 60 seconds later. Transient poll failures are retried,
+    // not treated as fatal.
+    let misses = 0;
     while (true) {
       await new Promise(function (r) { setTimeout(r, 4000); });
       if (reqId !== provRequestId) return; // user reset mid-flight
-      if (Date.now() > deadline) throw new Error('search timed out');
-      const pollRes = await fetch('/provenance/' + started.job_id);
-      const meta = await pollRes.json();
-      if (!pollRes.ok) throw new Error(meta.error || 'lost track of the search');
+      let meta;
+      try {
+        const pollRes = await fetch('/provenance/' + started.job_id);
+        meta = await pollRes.json();
+        if (!pollRes.ok) throw new Error(meta.error || 'lost track of the search');
+        misses = 0;
+      } catch (pollErr) {
+        if (++misses >= 5) throw pollErr; // ~20s of consecutive failures
+        continue;
+      }
       if (meta.status === 'error') throw new Error(meta.error || 'search failed');
       if (meta.status === 'done') { data = meta.result; break; }
     }
