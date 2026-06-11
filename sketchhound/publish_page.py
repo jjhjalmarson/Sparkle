@@ -145,53 +145,89 @@ PAGE_TEMPLATE = Template(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>SketchHound</title>
+<title>SketchHound ✨</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chewy&display=swap" rel="stylesheet">
 <style>
-  :root { color-scheme: light dark; }
+  /* Glitterville Studios palette: hot pink, sky blue, lime green, orange —
+     candy colors, sparkle, playful nostalgia. */
+  :root {
+    color-scheme: light dark;
+    --pink: #e6399b; --blue: #29a8d4; --lime: #8cc63f; --orange: #f7941d;
+    --gold: #d4a017;
+    --bg: #fff7ef; --card: #ffffff; --ink: #3a2440; --muted: #3a244099;
+    --edge: #f3cfe3;
+    --display: "Chewy", "Comic Sans MS", cursive;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #271a33; --card: #322342; --ink: #fdeef7; --muted: #fdeef799;
+      --edge: #59386b;
+    }
+  }
   * { box-sizing: border-box; }
   body { margin: 0 auto; max-width: 640px; padding: 0 12px 48px;
          font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-         background: Canvas; color: CanvasText; }
-  header { padding: 20px 0 4px; }
-  h1 { font-size: 1.5rem; margin: 0; }
-  .tagline { margin: 2px 0 0; font-size: .85rem; opacity: .65; }
-  .banner { background: #b3261e; color: #fff; border-radius: 10px;
+         background: var(--bg); color: var(--ink); }
+  /* carnival awning */
+  .awning { height: 14px; margin: 0 -12px;
+            background: repeating-linear-gradient(90deg,
+              var(--pink) 0 28px, var(--blue) 28px 56px,
+              var(--lime) 56px 84px, var(--orange) 84px 112px);
+            border-bottom: 3px solid var(--gold); }
+  header { padding: 18px 0 4px; text-align: center; }
+  h1 { font-family: var(--display); font-weight: 400; font-size: 2.1rem;
+       margin: 0; letter-spacing: .02em; color: var(--pink);
+       text-shadow: 2px 2px 0 color-mix(in srgb, var(--gold) 55%, transparent); }
+  .tagline { margin: 2px 0 0; font-size: .85rem; color: var(--muted); }
+  .banner { background: #b3261e; color: #fff; border-radius: 12px;
+            border: 2px dashed #ffd9d4;
             padding: 12px 14px; margin: 14px 0; font-size: .95rem; }
-  h2 { font-size: 1.05rem; margin: 26px 0 10px; padding-bottom: 4px;
-       border-bottom: 1px solid color-mix(in srgb, CanvasText 18%, transparent); }
-  .empty { font-size: .85rem; opacity: .55; margin: 8px 0 0; }
-  .card { display: flex; gap: 12px; padding: 12px;
-          border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
-          border-radius: 12px; margin-bottom: 10px; }
+  section h2 { font-family: var(--display); font-weight: 400; font-size: 1.35rem;
+       margin: 28px 0 10px; padding-bottom: 4px;
+       border-bottom: 3px dotted var(--accent, var(--edge));
+       color: var(--accent, var(--ink)); }
+  .s-hot { --accent: var(--pink); }
+  .s-attributed { --accent: var(--orange); }
+  .s-probable { --accent: var(--blue); }
+  .s-ending_soon { --accent: var(--lime); }
+  .empty { font-size: .85rem; color: var(--muted); margin: 8px 0 0; }
+  .card { display: flex; gap: 12px; padding: 12px; background: var(--card);
+          border: 2px solid var(--edge); border-left: 6px solid var(--accent, var(--edge));
+          border-radius: 14px; margin-bottom: 12px;
+          box-shadow: 0 2px 0 color-mix(in srgb, var(--accent, var(--edge)) 35%, transparent); }
   .card a.thumb { flex: none; }
-  .card img { width: 92px; height: 92px; object-fit: cover; border-radius: 8px;
-              background: color-mix(in srgb, CanvasText 8%, transparent); }
+  .card img { width: 92px; height: 92px; object-fit: cover; border-radius: 10px;
+              border: 2px solid var(--edge);
+              background: color-mix(in srgb, var(--ink) 8%, transparent); }
   .card .body { min-width: 0; }
   .title { font-size: .95rem; font-weight: 600; margin: 0 0 4px; }
   .title a { color: inherit; text-decoration: none; }
   .meta { font-size: .85rem; margin: 0 0 4px; }
-  .meta .price { font-weight: 700; }
-  .badge { display: inline-block; font-size: .75rem; font-weight: 600;
-           border-radius: 6px; padding: 1px 7px; margin-left: 6px;
-           background: color-mix(in srgb, CanvasText 10%, transparent); }
-  .badge.hot { background: #b3261e; color: #fff; }
-  .signals { font-size: .8rem; opacity: .75; margin: 0 0 4px; }
-  .stamps { font-size: .75rem; opacity: .55; margin: 0; }
-  footer { margin-top: 36px; font-size: .78rem; opacity: .65;
-           border-top: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
-           padding-top: 12px; }
+  .meta .price { font-weight: 700; color: var(--accent, inherit); }
+  .badge { display: inline-block; font-size: .75rem; font-weight: 700;
+           border-radius: 999px; padding: 1px 9px; margin-left: 6px;
+           background: color-mix(in srgb, var(--ink) 10%, transparent); }
+  .badge.hot { background: linear-gradient(135deg, var(--pink), var(--orange));
+               color: #fff; }
+  .signals { font-size: .8rem; color: var(--muted); margin: 0 0 4px; }
+  .stamps { font-size: .75rem; color: var(--muted); margin: 0; }
+  footer { margin-top: 36px; font-size: .78rem; color: var(--muted);
+           border-top: 3px dotted var(--edge); padding-top: 12px;
+           text-align: center; }
 </style>
 </head>
 <body>
+<div class="awning"></div>
 <header>
-  <h1>🐕 SketchHound</h1>
+  <h1>🐕 SketchHound ✨</h1>
   <p class="tagline">Film costume design sketches, sniffed out hourly on eBay</p>
 </header>
 
 {% if banner %}<div class="banner">⚠ {{ banner }}</div>{% endif %}
 
 {% for key, title in section_titles.items() %}
-<section>
+<section class="s-{{ key }}">
   <h2>{{ title }}</h2>
   {% if not sections[key] %}<p class="empty">Nothing right now.</p>{% endif %}
   {% for l in sections[key] %}
@@ -203,7 +239,7 @@ PAGE_TEMPLATE = Template(
         <span class="price">{{ "%.0f"|format(l.price_value) if l.price_value is not none else "?" }} {{ l.price_currency or "" }}</span>
         · {{ "Buy It Now" if l.listing_format and l.listing_format.value == "buy_it_now" else "Auction" }}
         {% if l.end_time %} · ends {{ l.end_time.strftime("%b %d, %H:%M") }} UTC{% endif %}
-        {% if key == "hot" %}<span class="badge hot">HOT</span>{% endif %}
+        {% if key == "hot" %}<span class="badge hot">✨ HOT</span>{% endif %}
       </p>
       <p class="meta">
         Sketch confidence {{ "%.0f%%"|format(l.confidence * 100) }}
@@ -225,7 +261,8 @@ PAGE_TEMPLATE = Template(
   {{ stats.fetched_count }} fetched · {{ stats.new_count }} new ·
   {{ stats.vision_call_count }} vision calls
   {% if stats.errors %} · {{ stats.errors|length }} errors{% endif %}<br>
-  Estimated model spend this month: ${{ "%.2f"|format(month_spend) }}
+  Estimated model spend this month: ${{ "%.2f"|format(month_spend) }}<br>
+  Made with ✨ for Glitterville Studios
 </footer>
 </body>
 </html>
