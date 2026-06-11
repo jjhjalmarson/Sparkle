@@ -223,6 +223,21 @@ def pending_vision(conn: sqlite3.Connection, limit: int) -> list[Listing]:
     return [_row_to_listing(r) for r in rows]
 
 
+def feed_candidates(conn: sqlite3.Connection) -> list[Listing]:
+    """Everything that could appear on the page: vision-scored listings plus
+    relistings (which inherited their original's verdict)."""
+    rows = conn.execute(
+        "SELECT * FROM listings WHERE stage_reached IN (?, ?) AND confidence IS NOT NULL",
+        (Stage.VISION_SCORED.value, Stage.RELISTED.value),
+    ).fetchall()
+    return [_row_to_listing(r) for r in rows]
+
+
+def original_price(conn: sqlite3.Connection, listing_id: int) -> float | None:
+    row = conn.execute("SELECT price_value FROM listings WHERE id = ?", (listing_id,)).fetchone()
+    return row["price_value"] if row else None
+
+
 def record_run(conn: sqlite3.Connection, stats: RunStats) -> RunStats:
     cur = conn.execute(
         """INSERT INTO runs (started_at, finished_at, fetched_count, new_count,

@@ -18,7 +18,7 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, dedup, fetch_ebay, gate, normalize, persist, vision_score
+from . import config, dedup, fetch_ebay, gate, normalize, persist, publish_page, vision_score
 from .config import ABORT_NEW_SURVIVORS, BACKFILL_VISION_CAP, Secrets, Watchlist, load_watchlist
 from .models import Listing, RunStats
 
@@ -143,10 +143,21 @@ def main(argv: list[str] | None = None) -> int:
         client = anthropic.Anthropic(api_key=secrets.anthropic_api_key)
         banner = gate_and_score(conn, new_by_kind, watchlist, client, stats)
 
-    # Build step 4: publish docs/index.html (banner included when set).
-    # Build step 5: ntfy push.
-
     stats.finished_at = datetime.now(timezone.utc)
+    newly_hot: list[Listing] = []
+    try:
+        sections = publish_page.select_sections(conn, watchlist, now)
+        newly_hot = publish_page.mark_newly_hot(conn, sections["hot"], now)
+        # This run isn't recorded yet, so add its spend to the footer figure.
+        month_spend = persist.month_spend_usd(conn, now) + stats.est_cost_usd
+        html = publish_page.render(sections, stats, month_spend, banner)
+        out = publish_page.publish(html, args.site_dir)
+        print(f"published {out} ({sum(len(v) for v in sections.values())} listings, {len(newly_hot)} newly hot)")
+    except Exception as exc:
+        stats.errors.append(f"publish: {exc}")
+
+    # Build step 5: ntfy push for newly_hot.
+
     persist.record_run(conn, stats)
 
     print(
