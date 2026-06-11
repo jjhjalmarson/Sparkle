@@ -151,7 +151,8 @@ PROVENANCE_KEYS = {
 
 _JOB_DIR = Path(os.environ.get("DATA_DIR", "").strip() or tempfile.gettempdir()) / "provenance_jobs"
 _JOB_ID_RE = re.compile(r"^[a-f0-9]{12}$")  # job ids appear in file paths
-JOB_STALL_SECONDS = 8 * 60  # worker restarted mid-job → report instead of spinning forever
+JOB_STALL_SECONDS = 15 * 60  # worker restarted mid-job → report instead of spinning forever
+# (deep searches have been observed taking 9-10 minutes; don't call them stalled early)
 
 
 def _job_path(job_id: str) -> Path:
@@ -449,6 +450,14 @@ def _dashboard_data() -> dict | None:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+@app.after_request
+def no_store(response):
+    """Never let browsers cache pages or polls — a stale page from before a
+    deploy speaks the old API shape and renders garbage."""
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
 
 @app.route("/healthz")
 def healthz():

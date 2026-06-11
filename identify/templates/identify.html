@@ -153,7 +153,7 @@
     <h2>📜 Public record</h2>
     <div class="prov-loading" id="prov-loading">
       <div class="spinner"></div>
-      <span>Searching auction records, film archives, museum collections&hellip;</span>
+      <span>Searching auction records, film archives, museum collections&hellip; deep searches can take 5&ndash;10 minutes.</span>
     </div>
     <div id="prov-body" style="display:none">
       <p class="prov-summary" id="p-summary"></p>
@@ -351,7 +351,7 @@ async function fetchProvenance(vision, notes) {
     const started = await startRes.json();
     if (!startRes.ok) throw new Error(started.error || 'Provenance search failed');
 
-    const deadline = Date.now() + 8 * 60 * 1000;
+    const deadline = Date.now() + 15 * 60 * 1000;
     while (true) {
       await new Promise(function (r) { setTimeout(r, 4000); });
       if (reqId !== provRequestId) return; // user reset mid-flight
