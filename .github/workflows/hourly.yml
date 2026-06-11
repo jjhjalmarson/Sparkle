@@ -21,9 +21,9 @@ jobs:
     # Backfill runs do up to 150 serial vision calls — give them headroom.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5.6.0
         with:
           python-version: "3.12"
           cache: pip
