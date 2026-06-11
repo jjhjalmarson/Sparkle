@@ -87,6 +87,58 @@ REQUIRED_KEYS = {
     "attribution_confidence", "signals", "era_estimate", "red_flags", "summary",
 }
 
+# ---------------------------------------------------------------------------
+# Provenance research (second pass: identification drives web searches)
+# ---------------------------------------------------------------------------
+
+MAX_WEB_SEARCHES = 6
+MAX_SEARCH_CONTINUATIONS = 5
+
+PROVENANCE_SYSTEM = """\
+You are a provenance researcher for film/TV costume design artwork. You are
+given an appraiser's identification of a physical sketch (artist attribution,
+era, visual signals) plus any collector notes. Your job is to search public
+sources for evidence that corroborates or contradicts that identification.
+
+Search targets, in rough priority order:
+- auction records: Heritage Auctions, Julien's, Bonhams, Christie's,
+  Sotheby's, Profiles in History — sales of the same or comparable pieces
+- film archives and databases: the production and character the design may
+  belong to, whether the costume appears on screen
+- museum and library collections: FIDM Museum, V&A, Met Costume Institute,
+  Margaret Herrick Library, university special collections
+- costume history sites, designer monographs, and documented exhibitions
+- photos of the designer at work with similar sketches
+
+Rules:
+- Cite ONLY sources you actually found via search. Never invent a URL,
+  auction lot, or film title. An empty evidence list is a good answer when
+  the search comes up dry.
+- Contradicting evidence matters as much as supporting evidence — e.g. the
+  design is a known piece that already sold elsewhere (suggesting a copy),
+  or the claimed era doesn't match the production's dates.
+- "provenance_confidence" reflects how well PUBLIC RECORD supports the
+  identification — not whether the sketch is genuine (the appraiser already
+  judged that from the photos).
+
+Respond with ONLY a JSON object, no prose, no markdown fences:
+{
+  "production_match": "<film or TV production>" or "unknown",
+  "character_or_performer": "<character/actress the design was for>" or "unknown",
+  "supporting_evidence": ["..."],
+  "contradicting_evidence": ["..."],
+  "comparable_sales": ["<auction house, year, price if found>"],
+  "sources": [{"title": "...", "url": "..."}],
+  "provenance_confidence": 0.0-1.0,
+  "summary": "Two or three sentences a collector can act on"
+}"""
+
+PROVENANCE_KEYS = {
+    "production_match", "character_or_performer", "supporting_evidence",
+    "contradicting_evidence", "comparable_sales", "sources",
+    "provenance_confidence", "summary",
+}
+
 
 def _prepare_image(raw: bytes) -> bytes:
     with Image.open(io.BytesIO(raw)) as img:
@@ -155,6 +207,80 @@ def analyze(images: list[bytes], notes: str = "") -> dict:
             ],
         )
         return _parse_response(retry.content[0].text)
+
+
+def _parse_provenance(content: list) -> dict:
+    text = "".join(b.text for b in content if b.type == "text")
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+    data = json.loads(cleaned)
+    missing = PROVENANCE_KEYS - data.keys()
+    if missing:
+        raise ValueError(f"missing keys: {sorted(missing)}")
+    return data
+
+
+def provenance_search(vision: dict, notes: str = "") -> dict:
+    """Second pass: drive web searches of public archives off the identification."""
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    brief = {
+        "attributed_artist": vision.get("attributed_artist", "unknown"),
+        "attribution_confidence": vision.get("attribution_confidence"),
+        "era_estimate": vision.get("era_estimate"),
+        "signals": vision.get("signals", []),
+        "summary": vision.get("summary", ""),
+    }
+    context = (
+        "Appraiser's identification of the sketch:\n"
+        f"{json.dumps(brief, indent=2)}\n"
+    )
+    if notes.strip():
+        context += f"\nCollector's notes: {notes.strip()}\n"
+    context += "\nResearch the public record for this piece."
+
+    tools = [{
+        "type": "web_search_20260209",
+        "name": "web_search",
+        "max_uses": MAX_WEB_SEARCHES,
+    }]
+    messages = [{"role": "user", "content": context}]
+
+    response = None
+    for _ in range(MAX_SEARCH_CONTINUATIONS):
+        response = client.messages.create(
+            model=VISION_MODEL,
+            max_tokens=4096,
+            system=PROVENANCE_SYSTEM,
+            tools=tools,
+            messages=messages,
+        )
+        if response.stop_reason != "pause_turn":
+            break
+        # Server-side search loop paused; re-send to let it resume.
+        messages = [
+            {"role": "user", "content": context},
+            {"role": "assistant", "content": response.content},
+        ]
+
+    try:
+        return _parse_provenance(response.content)
+    except (json.JSONDecodeError, ValueError):
+        retry = client.messages.create(
+            model=VISION_MODEL,
+            max_tokens=4096,
+            system=PROVENANCE_SYSTEM,
+            tools=tools,
+            messages=[
+                {"role": "user", "content": context},
+                {"role": "assistant", "content": response.content},
+                {"role": "user", "content": "Invalid JSON. Respond again with ONLY the JSON object — no new searches."},
+            ],
+        )
+        return _parse_provenance(retry.content)
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +440,25 @@ def analyze_endpoint():
     notes = request.form.get("notes", "")
     try:
         result = analyze(images, notes)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify(result)
+
+
+@app.route("/provenance", methods=["POST"])
+def provenance_endpoint():
+    payload = request.get_json(silent=True)
+    if not payload or not isinstance(payload.get("vision"), dict):
+        return jsonify({"error": "Send JSON with a 'vision' object from /analyze."}), 400
+
+    vision = payload["vision"]
+    if not vision.get("is_costume_design_sketch"):
+        return jsonify({"error": "Provenance research only runs on identified sketches."}), 400
+
+    notes = payload.get("notes", "") or ""
+    try:
+        result = provenance_search(vision, notes)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

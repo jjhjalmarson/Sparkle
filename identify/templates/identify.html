@@ -70,6 +70,24 @@
   .fill.mid { background: var(--orange); }
   .fill.low { background: var(--pink); }
 
+  .prov-card { background: var(--card); border: 2px solid var(--edge);
+    border-radius: 16px; padding: 20px; margin-top: 14px; overflow: hidden;
+    box-shadow: 0 3px 0 color-mix(in srgb, var(--edge) 50%, transparent); }
+  .prov-card h2 { font-family: var(--display); font-size: 1.15rem; margin: 0 0 4px; }
+  .prov-card .prov-loading { display: flex; align-items: center; gap: 10px;
+    color: var(--muted); font-size: .9rem; padding: 8px 0; }
+  .prov-card .spinner { width: 22px; height: 22px; border-width: 3px; }
+  .prov-card .prov-summary { font-size: .95rem; margin: 0 0 14px; color: var(--muted); }
+  .prov-card .prov-error { color: var(--muted); font-size: .88rem; font-style: italic; }
+  .evidence-box { margin-top: 14px; }
+  .evidence-box h3 { font-size: .8rem; text-transform: uppercase;
+    letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
+  .evidence-box ul { margin: 0; padding-left: 20px; font-size: .88rem; }
+  .evidence-box li { margin-bottom: 4px; }
+  .evidence-box.contra li { color: color-mix(in srgb, var(--pink) 80%, var(--ink)); }
+  .sources-box a { display: block; font-size: .85rem; color: var(--blue);
+    margin-bottom: 4px; word-break: break-all; }
+
   .error-msg { background: #b3261e; color: #fff; border-radius: 12px;
     padding: 12px 14px; margin: 16px 0; font-size: .9rem; display: none; }
   .error-msg.active { display: block; }
@@ -130,6 +148,50 @@
       <div id="r-flags"></div>
     </div>
   </div>
+
+  <div class="prov-card" id="prov-card" style="display:none">
+    <h2>📜 Public record</h2>
+    <div class="prov-loading" id="prov-loading">
+      <div class="spinner"></div>
+      <span>Searching auction records, film archives, museum collections&hellip;</span>
+    </div>
+    <div id="prov-body" style="display:none">
+      <p class="prov-summary" id="p-summary"></p>
+      <div class="detail-grid">
+        <div>
+          <p class="label">Production</p>
+          <p class="value" id="p-production"></p>
+        </div>
+        <div>
+          <p class="label">Character / performer</p>
+          <p class="value" id="p-character"></p>
+        </div>
+        <div>
+          <p class="label">Record support</p>
+          <p class="value" id="p-conf"></p>
+          <div class="confidence-bar"><div class="fill" id="p-conf-bar"></div></div>
+        </div>
+      </div>
+      <div class="evidence-box" id="p-support-box">
+        <h3>Supporting evidence</h3>
+        <ul id="p-support"></ul>
+      </div>
+      <div class="evidence-box contra" id="p-contra-box">
+        <h3>Contradicting evidence</h3>
+        <ul id="p-contra"></ul>
+      </div>
+      <div class="evidence-box" id="p-sales-box">
+        <h3>Comparable sales</h3>
+        <ul id="p-sales"></ul>
+      </div>
+      <div class="evidence-box sources-box" id="p-sources-box">
+        <h3>Sources</h3>
+        <div id="p-sources"></div>
+      </div>
+    </div>
+    <p class="prov-error" id="prov-error" style="display:none"></p>
+  </div>
+
   <div class="again"><a id="reset-link">Analyze another sketch</a></div>
 </div>
 {% endblock %}
@@ -199,6 +261,7 @@ form.addEventListener('submit', async e => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Analysis failed');
     showResult(data);
+    if (data.is_costume_design_sketch) fetchProvenance(data, form.notes.value);
   } catch (err) {
     errorEl.textContent = err.message;
     errorEl.classList.add('active');
@@ -262,7 +325,87 @@ function showResult(d) {
   resultEl.classList.add('active');
 }
 
+let provRequestId = 0;
+
+async function fetchProvenance(vision, notes) {
+  const reqId = ++provRequestId;
+  const card = document.getElementById('prov-card');
+  const loadingEl = document.getElementById('prov-loading');
+  const bodyEl = document.getElementById('prov-body');
+  const errEl = document.getElementById('prov-error');
+  card.style.display = '';
+  loadingEl.style.display = '';
+  bodyEl.style.display = 'none';
+  errEl.style.display = 'none';
+
+  let data;
+  try {
+    const res = await fetch('/provenance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vision, notes }),
+    });
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Provenance search failed');
+  } catch (err) {
+    if (reqId !== provRequestId) return; // user reset mid-flight
+    loadingEl.style.display = 'none';
+    errEl.textContent = 'Archive search unavailable: ' + err.message;
+    errEl.style.display = '';
+    return;
+  }
+  if (reqId !== provRequestId) return;
+
+  loadingEl.style.display = 'none';
+  document.getElementById('p-summary').textContent = data.summary || '';
+  document.getElementById('p-production').textContent = data.production_match || 'unknown';
+  document.getElementById('p-character').textContent = data.character_or_performer || 'unknown';
+
+  const conf = data.provenance_confidence || 0;
+  document.getElementById('p-conf').textContent = Math.round(conf * 100) + '%';
+  const bar = document.getElementById('p-conf-bar');
+  bar.style.width = (conf * 100) + '%';
+  bar.className = 'fill ' + confClass(conf);
+
+  fillList('p-support', 'p-support-box', data.supporting_evidence);
+  fillList('p-contra', 'p-contra-box', data.contradicting_evidence);
+  fillList('p-sales', 'p-sales-box', data.comparable_sales);
+
+  const srcBox = document.getElementById('p-sources-box');
+  const srcEl = document.getElementById('p-sources');
+  srcEl.innerHTML = '';
+  const sources = (data.sources || []).filter(s => s && s.url);
+  if (sources.length) {
+    sources.forEach(s => {
+      const a = document.createElement('a');
+      a.href = s.url;
+      a.textContent = s.title || s.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      srcEl.appendChild(a);
+    });
+    srcBox.style.display = '';
+  } else { srcBox.style.display = 'none'; }
+
+  bodyEl.style.display = '';
+}
+
+function fillList(listId, boxId, items) {
+  const box = document.getElementById(boxId);
+  const list = document.getElementById(listId);
+  list.innerHTML = '';
+  if (items && items.length) {
+    items.forEach(t => {
+      const li = document.createElement('li');
+      li.textContent = t;
+      list.appendChild(li);
+    });
+    box.style.display = '';
+  } else { box.style.display = 'none'; }
+}
+
 document.getElementById('reset-link').addEventListener('click', () => {
+  provRequestId++; // invalidate any in-flight provenance fetch
   selectedFiles = [];
   renderPreviews();
   fileinput.value = '';
@@ -270,6 +413,7 @@ document.getElementById('reset-link').addEventListener('click', () => {
   form.style.display = 'block';
   resultEl.classList.remove('active');
   errorEl.classList.remove('active');
+  document.getElementById('prov-card').style.display = 'none';
 });
 </script>
 {% endblock %}

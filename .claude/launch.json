@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv\\Scripts\\python.exe",
       "runtimeArgs": ["-m", "http.server", "8765", "--directory", "_demo"],
       "port": 8765
+    },
+    {
+      "name": "identify",
+      "runtimeExecutable": ".venv\\Scripts\\python.exe",
+      "runtimeArgs": ["identify\\app.py"],
+      "port": 5000
     }
   ]
 }
