@@ -6,7 +6,6 @@ requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.40",
     "requests>=2.32",
-    "tenacity>=9.0",
     "pyyaml>=6.0",
     "pillow>=10.0",
     "imagehash>=4.3",

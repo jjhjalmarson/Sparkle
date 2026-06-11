@@ -67,19 +67,18 @@ class Secrets:
 
     ebay_client_id: str
     ebay_client_secret: str
-    anthropic_api_key: str
+    anthropic_api_key: str = ""
 
     @classmethod
-    def from_env(cls) -> "Secrets":
-        missing = [
-            name
-            for name in ("EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET", "ANTHROPIC_API_KEY")
-            if not os.environ.get(name)
-        ]
+    def from_env(cls, require_anthropic: bool = True) -> "Secrets":
+        required = ["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET"]
+        if require_anthropic:
+            required.append("ANTHROPIC_API_KEY")
+        missing = [name for name in required if not os.environ.get(name)]
         if missing:
             raise RuntimeError(f"Missing required env vars: {', '.join(missing)}")
         return cls(
             ebay_client_id=os.environ["EBAY_CLIENT_ID"],
             ebay_client_secret=os.environ["EBAY_CLIENT_SECRET"],
-            anthropic_api_key=os.environ["ANTHROPIC_API_KEY"],
+            anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
         )

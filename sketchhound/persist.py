@@ -5,10 +5,13 @@ with the stage they were rejected at (tuning data).
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from dataclasses import asdict
+from datetime import datetime
 from pathlib import Path
 
-from .models import Listing, RunStats
+from .models import HaikuVerdict, Listing, ListingFormat, RunStats, Stage, VisionResult
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS listings (
@@ -54,34 +57,213 @@ CREATE TABLE IF NOT EXISTS runs (
 """
 
 
-def connect(db_path: Path) -> sqlite3.Connection:
-    """Open (creating parent dirs and schema if needed) and return a connection."""
-    raise NotImplementedError  # step 2
+def connect(db_path: Path | str) -> sqlite3.Connection:
+    if str(db_path) != ":memory:":
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(SCHEMA)
+    return conn
+
+
+def _iso(dt: datetime | None) -> str | None:
+    return dt.isoformat() if dt else None
+
+
+def _dt(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
+
+
+def _row_to_listing(row: sqlite3.Row) -> Listing:
+    vision = None
+    if row["vision_json"]:
+        vision = VisionResult(**json.loads(row["vision_json"]))
+    return Listing(
+        id=row["id"],
+        source=row["source"],
+        source_listing_id=row["source_listing_id"],
+        url=row["url"],
+        title=row["title"],
+        description_snippet=row["description_snippet"],
+        price_value=row["price_value"],
+        price_currency=row["price_currency"],
+        listing_format=ListingFormat(row["listing_format"]) if row["listing_format"] else None,
+        end_time=_dt(row["end_time"]),
+        image_urls=json.loads(row["image_urls"]),
+        image_phash=row["image_phash"],
+        first_seen_at=_dt(row["first_seen_at"]),
+        last_seen_at=_dt(row["last_seen_at"]),
+        stage_reached=Stage(row["stage_reached"]),
+        haiku_verdict=HaikuVerdict(row["haiku_verdict"]) if row["haiku_verdict"] else None,
+        vision=vision,
+        confidence=row["confidence"],
+        attributed_artist=row["attributed_artist"],
+        relisted_from=row["relisted_from"],
+        went_hot_at=_dt(row["went_hot_at"]),
+        alerted_at=_dt(row["alerted_at"]),
+    )
+
+
+def _listing_params(listing: Listing) -> dict:
+    return {
+        "source": listing.source,
+        "source_listing_id": listing.source_listing_id,
+        "url": listing.url,
+        "title": listing.title,
+        "description_snippet": listing.description_snippet,
+        "price_value": listing.price_value,
+        "price_currency": listing.price_currency,
+        "listing_format": listing.listing_format.value if listing.listing_format else None,
+        "end_time": _iso(listing.end_time),
+        "image_urls": json.dumps(listing.image_urls),
+        "image_phash": listing.image_phash,
+        "first_seen_at": _iso(listing.first_seen_at),
+        "last_seen_at": _iso(listing.last_seen_at),
+        "stage_reached": listing.stage_reached.value,
+        "haiku_verdict": listing.haiku_verdict.value if listing.haiku_verdict else None,
+        "vision_json": json.dumps(asdict(listing.vision)) if listing.vision else None,
+        "confidence": listing.confidence,
+        "attributed_artist": listing.attributed_artist,
+        "relisted_from": listing.relisted_from,
+        "went_hot_at": _iso(listing.went_hot_at),
+        "alerted_at": _iso(listing.alerted_at),
+    }
 
 
 def get_by_source_id(conn: sqlite3.Connection, source: str, source_listing_id: str) -> Listing | None:
-    raise NotImplementedError  # step 2
+    row = conn.execute(
+        "SELECT * FROM listings WHERE source = ? AND source_listing_id = ?",
+        (source, source_listing_id),
+    ).fetchone()
+    return _row_to_listing(row) if row else None
 
 
 def all_phashes(conn: sqlite3.Connection) -> list[tuple[int, str]]:
     """(listing id, phash hex) for every stored listing with a phash — relist detection."""
-    raise NotImplementedError  # step 2
+    return [
+        (row["id"], row["image_phash"])
+        for row in conn.execute("SELECT id, image_phash FROM listings WHERE image_phash IS NOT NULL")
+    ]
 
 
-def upsert_listing(conn: sqlite3.Connection, listing: Listing) -> Listing:
-    """Insert new, or refresh last_seen_at/price/end_time on re-sighting. Returns with id set."""
-    raise NotImplementedError  # step 2
+def insert_listing(conn: sqlite3.Connection, listing: Listing) -> Listing:
+    params = _listing_params(listing)
+    columns = ", ".join(params)
+    placeholders = ", ".join(f":{k}" for k in params)
+    cur = conn.execute(f"INSERT INTO listings ({columns}) VALUES ({placeholders})", params)
+    conn.commit()
+    listing.id = cur.lastrowid
+    return listing
+
+
+def touch_sighting(conn: sqlite3.Connection, listing_id: int, seen_at: datetime, fresh: Listing) -> None:
+    """Re-sighting of a known listing: refresh volatile fields only. Stage,
+    verdicts, and vision results are never overwritten by a re-fetch."""
+    conn.execute(
+        """UPDATE listings
+           SET last_seen_at = ?, price_value = ?, price_currency = ?, end_time = ?, url = ?
+           WHERE id = ?""",
+        (
+            _iso(seen_at),
+            fresh.price_value,
+            fresh.price_currency,
+            _iso(fresh.end_time),
+            fresh.url,
+            listing_id,
+        ),
+    )
+    conn.commit()
+
+
+def update_listing(conn: sqlite3.Connection, listing: Listing) -> None:
+    """Write back pipeline-mutable fields after gating/vision/hot/alert stamps."""
+    if listing.id is None:
+        raise ValueError("update_listing requires a persisted listing (id set)")
+    conn.execute(
+        """UPDATE listings
+           SET stage_reached = ?, haiku_verdict = ?, vision_json = ?, confidence = ?,
+               attributed_artist = ?, relisted_from = ?, went_hot_at = ?, alerted_at = ?,
+               image_phash = ?
+           WHERE id = ?""",
+        (
+            listing.stage_reached.value,
+            listing.haiku_verdict.value if listing.haiku_verdict else None,
+            json.dumps(asdict(listing.vision)) if listing.vision else None,
+            listing.confidence,
+            listing.attributed_artist,
+            listing.relisted_from,
+            _iso(listing.went_hot_at),
+            _iso(listing.alerted_at),
+            listing.image_phash,
+            listing.id,
+        ),
+    )
+    conn.commit()
 
 
 def pending_vision(conn: sqlite3.Connection, limit: int) -> list[Listing]:
-    """Gate survivors not yet vision-scored — the backfill drain queue."""
-    raise NotImplementedError  # step 2
+    """Gate survivors not yet vision-scored — the backfill drain queue.
+
+    Highest-confidence-gate first (brief section 6): Haiku RELEVANT, then
+    UNSURE, then generic-query survivors (no verdict), oldest first within
+    each band.
+    """
+    rows = conn.execute(
+        """SELECT * FROM listings
+           WHERE stage_reached = ?
+           ORDER BY CASE haiku_verdict
+                        WHEN 'RELEVANT' THEN 0
+                        WHEN 'UNSURE' THEN 1
+                        ELSE 2
+                    END,
+                    first_seen_at
+           LIMIT ?""",
+        (Stage.GATE_SURVIVOR.value, limit),
+    ).fetchall()
+    return [_row_to_listing(r) for r in rows]
 
 
 def record_run(conn: sqlite3.Connection, stats: RunStats) -> RunStats:
-    raise NotImplementedError  # step 2
+    cur = conn.execute(
+        """INSERT INTO runs (started_at, finished_at, fetched_count, new_count,
+                             vision_call_count, est_cost_usd, errors)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            _iso(stats.started_at),
+            _iso(stats.finished_at),
+            stats.fetched_count,
+            stats.new_count,
+            stats.vision_call_count,
+            stats.est_cost_usd,
+            json.dumps(stats.errors),
+        ),
+    )
+    conn.commit()
+    stats.id = cur.lastrowid
+    return stats
 
 
-def month_spend_usd(conn: sqlite3.Connection) -> float:
-    """Sum est_cost_usd over runs in the current calendar month — feed footer."""
-    raise NotImplementedError  # step 2
+def last_run(conn: sqlite3.Connection) -> RunStats | None:
+    row = conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+    if not row:
+        return None
+    return RunStats(
+        id=row["id"],
+        started_at=_dt(row["started_at"]),
+        finished_at=_dt(row["finished_at"]),
+        fetched_count=row["fetched_count"],
+        new_count=row["new_count"],
+        vision_call_count=row["vision_call_count"],
+        est_cost_usd=row["est_cost_usd"],
+        errors=json.loads(row["errors"]),
+    )
+
+
+def month_spend_usd(conn: sqlite3.Connection, now: datetime) -> float:
+    """Sum est_cost_usd over runs in `now`'s calendar month — feed footer."""
+    prefix = now.strftime("%Y-%m")
+    row = conn.execute(
+        "SELECT COALESCE(SUM(est_cost_usd), 0) FROM runs WHERE started_at LIKE ?",
+        (f"{prefix}%",),
+    ).fetchone()
+    return float(row[0])
