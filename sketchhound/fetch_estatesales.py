@@ -24,7 +24,7 @@ _HEADERS = {
     "Accept": "application/json",
 }
 _INCLUDE = "highlightedPictures,dates"
-_MULTISELECT = "saleDetail:id,orgName,name,lastLocalEndDate"
+_MULTISELECT = "saleDetail:id,orgName,name,lastLocalEndDate,highlightedPictures"
 
 
 def _parse_dt(node: dict | None) -> datetime | None:
