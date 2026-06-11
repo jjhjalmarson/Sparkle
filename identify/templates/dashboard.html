@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}SketchHound Dashboard{% endblock %}
+{% block extra_css %}
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    margin: 16px 0; }
+  .stat-card { background: var(--card); border: 2px solid var(--edge);
+    border-radius: 14px; padding: 14px 16px; text-align: center;
+    box-shadow: 0 2px 0 color-mix(in srgb, var(--edge) 40%, transparent); }
+  .stat-card .num { font-family: var(--display); font-size: 1.8rem;
+    line-height: 1.1; color: var(--pink); }
+  .stat-card .lbl { font-size: .78rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em; margin-top: 2px; }
+  .stat-card.wide { grid-column: span 2; }
+
+  section { margin: 24px 0 0; }
+  section h2 { font-family: var(--display); font-weight: 400; font-size: 1.25rem;
+    margin: 0 0 10px; padding-bottom: 4px;
+    border-bottom: 3px dotted var(--edge); color: var(--ink); }
+
+  .stage-bar { display: flex; height: 28px; border-radius: 8px;
+    overflow: hidden; margin: 8px 0 6px; }
+  .stage-bar .seg { display: flex; align-items: center; justify-content: center;
+    font-size: .72rem; font-weight: 700; color: #fff;
+    min-width: 2px; transition: width .4s; }
+  .stage-legend { display: flex; flex-wrap: wrap; gap: 6px 14px;
+    font-size: .78rem; margin-bottom: 8px; }
+  .stage-legend .dot { display: inline-block; width: 10px; height: 10px;
+    border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+
+  .run-table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+  .run-table th { text-align: left; font-size: .72rem; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--muted); padding: 6px 6px;
+    border-bottom: 2px solid var(--edge); }
+  .run-table td { padding: 6px 6px; border-bottom: 1px solid var(--edge); }
+  .run-table .err { color: #b3261e; font-weight: 600; }
+  .run-table .ok { color: var(--lime); }
+
+  .artist-list { list-style: none; padding: 0; margin: 0; }
+  .artist-list li { display: flex; justify-content: space-between;
+    padding: 6px 0; border-bottom: 1px solid var(--edge);
+    font-size: .88rem; }
+  .artist-list .count { font-weight: 700; color: var(--pink); }
+
+  .no-data { background: var(--card); border: 2px dashed var(--edge);
+    border-radius: 14px; padding: 32px 20px; text-align: center;
+    margin: 24px 0; color: var(--muted); }
+
+  .updated { font-size: .78rem; color: var(--muted); text-align: center;
+    margin: 10px 0 0; }
+{% endblock %}
+
+{% block content %}
+{% if not has_data %}
+<div class="no-data">
+  <p style="font-size:1.1rem;">No pipeline data yet.</p>
+  <p>The hourly eBay scan hasn't produced results yet, or the database hasn't been committed.</p>
+</div>
+{% else %}
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="num">{{ total_listings }}</div>
+    <div class="lbl">Listings tracked</div>
+  </div>
+  <div class="stat-card">
+    <div class="num">{{ sketch_count }}</div>
+    <div class="lbl">Sketches found</div>
+  </div>
+  <div class="stat-card">
+    <div class="num">{{ hot_count }}</div>
+    <div class="lbl">Hot finds</div>
+  </div>
+  <div class="stat-card">
+    <div class="num">${{ "%.2f"|format(month_spend) }}</div>
+    <div class="lbl">Spend this month</div>
+  </div>
+</div>
+
+<section>
+  <h2>Pipeline breakdown</h2>
+  <div class="stage-bar">
+    {% for stage in stages %}
+    <div class="seg" style="width:{{ stage.pct }}%; background:{{ stage.color }};"
+         title="{{ stage.label }}: {{ stage.count }}">
+      {% if stage.pct > 8 %}{{ stage.count }}{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="stage-legend">
+    {% for stage in stages %}
+    <span><span class="dot" style="background:{{ stage.color }};"></span>{{ stage.label }} ({{ stage.count }})</span>
+    {% endfor %}
+  </div>
+</section>
+
+{% if artists %}
+<section>
+  <h2>Artists identified</h2>
+  <ul class="artist-list">
+    {% for name, count in artists %}
+    <li><span>{{ name }}</span> <span class="count">{{ count }}</span></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section>
+  <h2>Recent runs</h2>
+  <div style="overflow-x:auto;">
+  <table class="run-table">
+    <thead>
+      <tr><th>When</th><th>Fetched</th><th>New</th><th>Vision</th><th>Cost</th><th>Errors</th></tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+      <tr>
+        <td>{{ r.started }}</td>
+        <td>{{ r.fetched }}</td>
+        <td>{{ r.new }}</td>
+        <td>{{ r.vision }}</td>
+        <td>${{ "%.3f"|format(r.cost) }}</td>
+        <td class="{{ 'err' if r.errors > 0 else 'ok' }}">{{ r.errors }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+{% if backfill_remaining > 0 %}
+<section>
+  <h2>Backfill queue</h2>
+  <div class="stat-card wide">
+    <div class="num">{{ backfill_remaining }}</div>
+    <div class="lbl">Gate survivors awaiting vision scoring</div>
+  </div>
+</section>
+{% endif %}
+
+<p class="updated">Data as of last deploy &middot; refreshes with each hourly pipeline run</p>
+{% endif %}
+{% endblock %}

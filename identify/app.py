@@ -1,9 +1,7 @@
-"""SketchHound Identify — drag-and-drop provenance analysis for costume design
-sketches. Upload up to 3 photos; Sonnet vision returns attribution, confidence,
-signals, and red flags.
+"""SketchHound — Identify (provenance analysis) + Dashboard (pipeline stats).
 
-Deployed on Render (free tier, ephemeral). The ANTHROPIC_API_KEY env var is the
-only secret.
+Deployed on Render (free tier, ephemeral). Reads the pipeline DB from the
+repo checkout (refreshed each hourly Actions commit → Render auto-deploy).
 """
 
 from __future__ import annotations
@@ -12,9 +10,12 @@ import base64
 import io
 import json
 import os
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
 
 import anthropic
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
 from PIL import Image
 
 app = Flask(__name__)
@@ -24,8 +25,15 @@ MAX_IMAGE_EDGE = 1568
 JPEG_QUALITY = 85
 MAX_UPLOAD_MB = 20
 VISION_MODEL = "claude-sonnet-4-6"
+FEED_URL = "https://jjhjalmarson.github.io/Sparkle/"
 
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_MB * 1024 * 1024
+
+DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sketchhound.db"
+
+# ---------------------------------------------------------------------------
+# Vision (shared with the pipeline but self-contained here)
+# ---------------------------------------------------------------------------
 
 VISION_SYSTEM = """\
 You are an expert appraiser of original film/TV costume design artwork
@@ -75,14 +83,8 @@ Respond with ONLY a JSON object, no prose, no markdown fences:
 }"""
 
 REQUIRED_KEYS = {
-    "is_costume_design_sketch",
-    "confidence",
-    "attributed_artist",
-    "attribution_confidence",
-    "signals",
-    "era_estimate",
-    "red_flags",
-    "summary",
+    "is_costume_design_sketch", "confidence", "attributed_artist",
+    "attribution_confidence", "signals", "era_estimate", "red_flags", "summary",
 }
 
 
@@ -155,9 +157,140 @@ def analyze(images: list[bytes], notes: str = "") -> dict:
         return _parse_response(retry.content[0].text)
 
 
+# ---------------------------------------------------------------------------
+# Dashboard helpers
+# ---------------------------------------------------------------------------
+
+STAGE_COLORS = {
+    "vision_scored": "#8cc63f",
+    "gate_survivor": "#29a8d4",
+    "negative_keyword_reject": "#3a244066",
+    "haiku_reject": "#f7941d",
+    "relisted": "#d4a017",
+}
+STAGE_LABELS = {
+    "vision_scored": "Vision scored",
+    "gate_survivor": "Awaiting vision",
+    "negative_keyword_reject": "Keyword reject",
+    "haiku_reject": "Haiku reject",
+    "relisted": "Relisted",
+}
+
+
+def _open_db() -> sqlite3.Connection | None:
+    if not DB_PATH.exists():
+        return None
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _dashboard_data() -> dict | None:
+    conn = _open_db()
+    if conn is None:
+        return None
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM listings").fetchone()[0]
+        if total == 0:
+            return None
+
+        stages_raw = conn.execute(
+            "SELECT stage_reached, COUNT(*) as c FROM listings GROUP BY stage_reached ORDER BY c DESC"
+        ).fetchall()
+        stages = []
+        for row in stages_raw:
+            s = row["stage_reached"]
+            stages.append({
+                "label": STAGE_LABELS.get(s, s),
+                "count": row["c"],
+                "pct": round(row["c"] / total * 100, 1),
+                "color": STAGE_COLORS.get(s, "#e6399b"),
+            })
+
+        sketch_count = conn.execute(
+            "SELECT COUNT(*) FROM listings WHERE vision_json IS NOT NULL "
+            "AND json_extract(vision_json, '$.is_costume_design_sketch') = 1"
+        ).fetchone()[0]
+
+        hot_count = conn.execute(
+            "SELECT COUNT(*) FROM listings WHERE went_hot_at IS NOT NULL"
+        ).fetchone()[0]
+
+        now = datetime.now(timezone.utc)
+        prefix = now.strftime("%Y-%m")
+        month_spend = conn.execute(
+            "SELECT COALESCE(SUM(est_cost_usd), 0) FROM runs WHERE started_at LIKE ?",
+            (f"{prefix}%",),
+        ).fetchone()[0]
+
+        runs_raw = conn.execute(
+            "SELECT started_at, fetched_count, new_count, vision_call_count, "
+            "est_cost_usd, errors FROM runs ORDER BY id DESC LIMIT 10"
+        ).fetchall()
+        runs = []
+        for r in runs_raw:
+            started = r["started_at"]
+            if started:
+                dt = datetime.fromisoformat(started)
+                started = dt.strftime("%b %d %H:%M")
+            errors = json.loads(r["errors"]) if r["errors"] else []
+            runs.append({
+                "started": started or "?",
+                "fetched": r["fetched_count"],
+                "new": r["new_count"],
+                "vision": r["vision_call_count"],
+                "cost": r["est_cost_usd"],
+                "errors": len(errors),
+            })
+
+        artists_raw = conn.execute(
+            "SELECT attributed_artist, COUNT(*) as c FROM listings "
+            "WHERE attributed_artist IS NOT NULL AND LOWER(attributed_artist) != 'unknown' "
+            "AND vision_json IS NOT NULL "
+            "AND json_extract(vision_json, '$.is_costume_design_sketch') = 1 "
+            "GROUP BY attributed_artist ORDER BY c DESC LIMIT 15"
+        ).fetchall()
+        artists = [(r["attributed_artist"], r["c"]) for r in artists_raw]
+
+        backfill = conn.execute(
+            "SELECT COUNT(*) FROM listings WHERE stage_reached = 'gate_survivor'"
+        ).fetchone()[0]
+
+        return {
+            "total_listings": total,
+            "sketch_count": sketch_count,
+            "hot_count": hot_count,
+            "month_spend": month_spend,
+            "stages": stages,
+            "runs": runs,
+            "artists": artists,
+            "backfill_remaining": backfill,
+        }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
 @app.route("/")
 def index():
-    return PAGE_HTML
+    return render_template("identify.html",
+                           tagline="Drop photos of a sketch and let Sonnet trace its provenance",
+                           active_page="identify", feed_url=FEED_URL)
+
+
+@app.route("/dashboard")
+def dashboard():
+    data = _dashboard_data()
+    if data is None:
+        return render_template("dashboard.html", has_data=False,
+                               tagline="Pipeline health at a glance",
+                               active_page="dashboard", feed_url=FEED_URL)
+    return render_template("dashboard.html", has_data=True,
+                           tagline="Pipeline health at a glance",
+                           active_page="dashboard", feed_url=FEED_URL, **data)
 
 
 @app.route("/analyze", methods=["POST"])
@@ -186,335 +319,6 @@ def analyze_endpoint():
 
     return jsonify(result)
 
-
-PAGE_HTML = """\
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>SketchHound Identify</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Chewy&display=swap" rel="stylesheet">
-<style>
-  :root {
-    color-scheme: light dark;
-    --pink: #e6399b; --blue: #29a8d4; --lime: #8cc63f; --orange: #f7941d;
-    --gold: #d4a017;
-    --bg: #fff7ef; --card: #ffffff; --ink: #3a2440; --muted: #3a244099;
-    --edge: #f3cfe3;
-    --display: "Chewy", "Comic Sans MS", cursive;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #271a33; --card: #322342; --ink: #fdeef7; --muted: #fdeef799;
-      --edge: #59386b;
-    }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0 auto; max-width: 640px; padding: 0 12px 48px;
-         font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-         background: var(--bg); color: var(--ink); }
-  .awning { height: 14px; margin: 0 -12px;
-            background: repeating-linear-gradient(90deg,
-              var(--pink) 0 28px, var(--blue) 28px 56px,
-              var(--lime) 56px 84px, var(--orange) 84px 112px);
-            border-bottom: 3px solid var(--gold); }
-  header { padding: 18px 0 4px; text-align: center; }
-  h1 { font-family: var(--display); font-weight: 400; font-size: 2.1rem;
-       margin: 0; letter-spacing: .02em; color: var(--pink);
-       text-shadow: 2px 2px 0 color-mix(in srgb, var(--gold) 55%, transparent); }
-  .tagline { margin: 2px 0 0; font-size: .85rem; color: var(--muted); }
-
-  /* Upload zone */
-  .drop-zone { border: 3px dashed var(--edge); border-radius: 18px;
-    padding: 36px 20px; text-align: center; margin: 20px 0 12px;
-    cursor: pointer; transition: border-color .2s, background .2s; }
-  .drop-zone.hover { border-color: var(--pink);
-    background: color-mix(in srgb, var(--pink) 8%, transparent); }
-  .drop-zone p { margin: 0; font-size: 1.05rem; }
-  .drop-zone .hint { font-size: .82rem; color: var(--muted); margin-top: 6px; }
-  .drop-zone input { display: none; }
-
-  .previews { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; }
-  .previews img { width: 92px; height: 92px; object-fit: cover; border-radius: 10px;
-    border: 2px solid var(--edge); }
-
-  .notes { width: 100%; padding: 10px 12px; border: 2px solid var(--edge);
-    border-radius: 12px; font-size: .9rem; background: var(--card);
-    color: var(--ink); resize: vertical; min-height: 48px;
-    font-family: inherit; }
-  .notes::placeholder { color: var(--muted); }
-
-  .btn { display: block; width: 100%; margin: 14px 0; padding: 14px;
-    font-family: var(--display); font-size: 1.2rem; letter-spacing: .02em;
-    background: linear-gradient(135deg, var(--pink), var(--orange));
-    color: #fff; border: none; border-radius: 14px; cursor: pointer;
-    box-shadow: 0 3px 0 color-mix(in srgb, var(--pink) 60%, #000);
-    transition: opacity .2s; }
-  .btn:disabled { opacity: .5; cursor: not-allowed; }
-  .btn:hover:not(:disabled) { opacity: .9; }
-
-  /* Loading */
-  .loading { display: none; text-align: center; padding: 24px 0; }
-  .loading.active { display: block; }
-  .spinner { display: inline-block; width: 36px; height: 36px;
-    border: 4px solid var(--edge); border-top-color: var(--pink);
-    border-radius: 50%; animation: spin .8s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .loading p { margin: 10px 0 0; font-size: .9rem; color: var(--muted); }
-
-  /* Result card */
-  .result { display: none; margin: 20px 0; }
-  .result.active { display: block; }
-  .result-card { background: var(--card); border: 2px solid var(--edge);
-    border-radius: 16px; padding: 20px; overflow: hidden;
-    box-shadow: 0 3px 0 color-mix(in srgb, var(--edge) 50%, transparent); }
-  .result-card .verdict { font-family: var(--display); font-size: 1.4rem;
-    margin: 0 0 4px; }
-  .result-card .verdict.yes { color: var(--lime); }
-  .result-card .verdict.no { color: var(--pink); }
-  .result-card .summary { font-size: .95rem; margin: 0 0 14px; color: var(--muted); }
-
-  .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
-  .detail-grid .label { font-size: .75rem; text-transform: uppercase;
-    letter-spacing: .05em; color: var(--muted); margin: 0 0 2px; }
-  .detail-grid .value { font-size: .95rem; margin: 0; font-weight: 600; }
-
-  .signals-box, .flags-box { margin-top: 14px; }
-  .signals-box h3, .flags-box h3 { font-size: .8rem; text-transform: uppercase;
-    letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
-  .tag { display: inline-block; font-size: .82rem; padding: 2px 10px;
-    border-radius: 999px; margin: 0 4px 6px 0;
-    background: color-mix(in srgb, var(--blue) 15%, transparent);
-    color: var(--ink); }
-  .tag.flag { background: color-mix(in srgb, var(--pink) 18%, transparent); }
-
-  .confidence-bar { height: 8px; border-radius: 4px; margin: 4px 0 0;
-    background: color-mix(in srgb, var(--ink) 10%, transparent); overflow: hidden; }
-  .confidence-bar .fill { height: 100%; border-radius: 4px;
-    transition: width .6s ease; }
-  .fill.high { background: var(--lime); }
-  .fill.mid { background: var(--orange); }
-  .fill.low { background: var(--pink); }
-
-  .error-msg { background: #b3261e; color: #fff; border-radius: 12px;
-    padding: 12px 14px; margin: 16px 0; font-size: .9rem; display: none; }
-  .error-msg.active { display: block; }
-
-  .again { text-align: center; margin-top: 16px; }
-  .again a { color: var(--pink); cursor: pointer; font-size: .9rem; }
-
-  footer { margin-top: 36px; font-size: .78rem; color: var(--muted);
-    border-top: 3px dotted var(--edge); padding-top: 12px; text-align: center; }
-</style>
-</head>
-<body>
-<div class="awning"></div>
-<header>
-  <h1>🔍 SketchHound Identify</h1>
-  <p class="tagline">Drop photos of a sketch and let Sonnet trace its provenance</p>
-</header>
-
-<form id="form">
-  <div class="drop-zone" id="dropzone">
-    <p>📸 Drop photos here or tap to browse</p>
-    <p class="hint">Up to 3 images — front, back, detail</p>
-    <input type="file" id="fileinput" accept="image/*" multiple>
-  </div>
-  <div class="previews" id="previews"></div>
-  <textarea class="notes" name="notes" placeholder="Any context? e.g. 'Bought at Sotheby's 2019, seller said Helen Rose'" rows="2"></textarea>
-  <button type="submit" class="btn" id="submit-btn" disabled>Identify this sketch</button>
-</form>
-
-<div class="loading" id="loading">
-  <div class="spinner"></div>
-  <p>Sonnet is examining your images&hellip;</p>
-</div>
-
-<div class="error-msg" id="error"></div>
-
-<div class="result" id="result">
-  <div class="result-card">
-    <p class="verdict" id="r-verdict"></p>
-    <p class="summary" id="r-summary"></p>
-    <div class="detail-grid">
-      <div>
-        <p class="label">Artist</p>
-        <p class="value" id="r-artist"></p>
-      </div>
-      <div>
-        <p class="label">Attribution confidence</p>
-        <p class="value" id="r-attr-conf"></p>
-        <div class="confidence-bar"><div class="fill" id="r-attr-bar"></div></div>
-      </div>
-      <div>
-        <p class="label">Sketch confidence</p>
-        <p class="value" id="r-conf"></p>
-        <div class="confidence-bar"><div class="fill" id="r-conf-bar"></div></div>
-      </div>
-      <div>
-        <p class="label">Era estimate</p>
-        <p class="value" id="r-era"></p>
-      </div>
-    </div>
-    <div class="signals-box" id="r-signals-box">
-      <h3>Signals</h3>
-      <div id="r-signals"></div>
-    </div>
-    <div class="flags-box" id="r-flags-box">
-      <h3>Red flags</h3>
-      <div id="r-flags"></div>
-    </div>
-  </div>
-  <div class="again"><a id="reset-link">Analyze another sketch</a></div>
-</div>
-
-<footer>
-  Powered by Claude Sonnet &middot; Made with ✨ for Glitterville Studios
-</footer>
-
-<script>
-const dropzone = document.getElementById('dropzone');
-const fileinput = document.getElementById('fileinput');
-const previews = document.getElementById('previews');
-const form = document.getElementById('form');
-const submitBtn = document.getElementById('submit-btn');
-const loading = document.getElementById('loading');
-const errorEl = document.getElementById('error');
-const resultEl = document.getElementById('result');
-let selectedFiles = [];
-
-dropzone.addEventListener('click', () => fileinput.click());
-dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('hover'); });
-dropzone.addEventListener('dragleave', () => dropzone.classList.remove('hover'));
-dropzone.addEventListener('drop', e => {
-  e.preventDefault();
-  dropzone.classList.remove('hover');
-  addFiles(e.dataTransfer.files);
-});
-fileinput.addEventListener('change', () => addFiles(fileinput.files));
-
-function addFiles(fileList) {
-  for (const f of fileList) {
-    if (selectedFiles.length >= 3) break;
-    if (!f.type.startsWith('image/')) continue;
-    selectedFiles.push(f);
-  }
-  renderPreviews();
-}
-
-function renderPreviews() {
-  previews.innerHTML = '';
-  selectedFiles.forEach((f, i) => {
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(f);
-    img.addEventListener('click', () => {
-      selectedFiles.splice(i, 1);
-      renderPreviews();
-    });
-    img.title = 'Click to remove';
-    img.style.cursor = 'pointer';
-    previews.appendChild(img);
-  });
-  submitBtn.disabled = selectedFiles.length === 0;
-}
-
-form.addEventListener('submit', async e => {
-  e.preventDefault();
-  if (!selectedFiles.length) return;
-
-  errorEl.classList.remove('active');
-  resultEl.classList.remove('active');
-  form.style.display = 'none';
-  loading.classList.add('active');
-
-  const fd = new FormData();
-  selectedFiles.forEach(f => fd.append('images', f));
-  fd.append('notes', form.notes.value);
-
-  try {
-    const res = await fetch('/analyze', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Analysis failed');
-    showResult(data);
-  } catch (err) {
-    errorEl.textContent = err.message;
-    errorEl.classList.add('active');
-    form.style.display = 'block';
-  } finally {
-    loading.classList.remove('active');
-  }
-});
-
-function confClass(v) { return v >= 0.7 ? 'high' : v >= 0.4 ? 'mid' : 'low'; }
-
-function showResult(d) {
-  const isSketch = d.is_costume_design_sketch;
-  const verdictEl = document.getElementById('r-verdict');
-  verdictEl.textContent = isSketch ? '✨ Original costume design sketch' : '✗ Not an original sketch';
-  verdictEl.className = 'verdict ' + (isSketch ? 'yes' : 'no');
-
-  document.getElementById('r-summary').textContent = d.summary;
-  document.getElementById('r-artist').textContent = d.attributed_artist || 'unknown';
-
-  const attrConf = d.attribution_confidence;
-  document.getElementById('r-attr-conf').textContent = Math.round(attrConf * 100) + '%';
-  const attrBar = document.getElementById('r-attr-bar');
-  attrBar.style.width = (attrConf * 100) + '%';
-  attrBar.className = 'fill ' + confClass(attrConf);
-
-  const conf = d.confidence;
-  document.getElementById('r-conf').textContent = Math.round(conf * 100) + '%';
-  const confBar = document.getElementById('r-conf-bar');
-  confBar.style.width = (conf * 100) + '%';
-  confBar.className = 'fill ' + confClass(conf);
-
-  document.getElementById('r-era').textContent = d.era_estimate || '—';
-
-  const sigBox = document.getElementById('r-signals-box');
-  const sigEl = document.getElementById('r-signals');
-  sigEl.innerHTML = '';
-  if (d.signals && d.signals.length) {
-    d.signals.forEach(s => {
-      const span = document.createElement('span');
-      span.className = 'tag';
-      span.textContent = s;
-      sigEl.appendChild(span);
-    });
-    sigBox.style.display = '';
-  } else { sigBox.style.display = 'none'; }
-
-  const flagBox = document.getElementById('r-flags-box');
-  const flagEl = document.getElementById('r-flags');
-  flagEl.innerHTML = '';
-  if (d.red_flags && d.red_flags.length) {
-    d.red_flags.forEach(f => {
-      const span = document.createElement('span');
-      span.className = 'tag flag';
-      span.textContent = f;
-      flagEl.appendChild(span);
-    });
-    flagBox.style.display = '';
-  } else { flagBox.style.display = 'none'; }
-
-  resultEl.classList.add('active');
-}
-
-document.getElementById('reset-link').addEventListener('click', () => {
-  selectedFiles = [];
-  renderPreviews();
-  fileinput.value = '';
-  form.notes.value = '';
-  form.style.display = 'block';
-  resultEl.classList.remove('active');
-  errorEl.classList.remove('active');
-});
-</script>
-</body>
-</html>
-"""
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

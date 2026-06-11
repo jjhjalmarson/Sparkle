@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{% block title %}SketchHound{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chewy&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light dark;
+    --pink: #e6399b; --blue: #29a8d4; --lime: #8cc63f; --orange: #f7941d;
+    --gold: #d4a017;
+    --bg: #fff7ef; --card: #ffffff; --ink: #3a2440; --muted: #3a244099;
+    --edge: #f3cfe3;
+    --display: "Chewy", "Comic Sans MS", cursive;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #271a33; --card: #322342; --ink: #fdeef7; --muted: #fdeef799;
+      --edge: #59386b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; max-width: 640px; padding: 0 12px 48px;
+         font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--ink); }
+  .awning { height: 14px; margin: 0 -12px;
+            background: repeating-linear-gradient(90deg,
+              var(--pink) 0 28px, var(--blue) 28px 56px,
+              var(--lime) 56px 84px, var(--orange) 84px 112px);
+            border-bottom: 3px solid var(--gold); }
+  header { padding: 18px 0 4px; text-align: center; }
+  h1 { font-family: var(--display); font-weight: 400; font-size: 2.1rem;
+       margin: 0; letter-spacing: .02em; color: var(--pink);
+       text-shadow: 2px 2px 0 color-mix(in srgb, var(--gold) 55%, transparent); }
+  .tagline { margin: 2px 0 0; font-size: .85rem; color: var(--muted); }
+
+  nav { display: flex; justify-content: center; gap: 6px; margin: 14px 0 4px;
+        flex-wrap: wrap; }
+  nav a { display: inline-block; font-size: .85rem; padding: 5px 14px;
+          border: 2px solid var(--edge); border-radius: 999px;
+          text-decoration: none; color: var(--ink);
+          transition: background .15s, border-color .15s; }
+  nav a:hover { border-color: var(--pink); }
+  nav a.active { background: var(--pink); color: #fff; border-color: var(--pink); }
+
+  footer { margin-top: 36px; font-size: .78rem; color: var(--muted);
+           border-top: 3px dotted var(--edge); padding-top: 12px;
+           text-align: center; }
+
+  {% block extra_css %}{% endblock %}
+</style>
+</head>
+<body>
+<div class="awning"></div>
+<header>
+  <h1>🐕 SketchHound ✨</h1>
+  <p class="tagline">{{ tagline }}</p>
+</header>
+<nav>
+  <a href="/" {% if active_page == 'identify' %}class="active"{% endif %}>Identify</a>
+  <a href="/dashboard" {% if active_page == 'dashboard' %}class="active"{% endif %}>Dashboard</a>
+  <a href="{{ feed_url }}" target="_blank">Feed ↗</a>
+</nav>
+{% block content %}{% endblock %}
+<footer>
+  Powered by Claude Sonnet &middot; Made with ✨ for Glitterville Studios
+</footer>
+{% block scripts %}{% endblock %}
+</body>
+</html>
