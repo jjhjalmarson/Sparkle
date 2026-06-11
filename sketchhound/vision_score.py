@@ -49,7 +49,12 @@ Evidence to look for:
 Red-flag aggressively. The Bob Mackie market especially is flooded with
 modern reproductions, prints, and "after Mackie" copies: uniform surface
 sheen, halftone dots, perfectly white paper, printed signatures, giclee
-texture, or a too-clean board are all red flags. NEVER inflate attribution:
+texture, or a too-clean board are all red flags. A PHOTOGRAPH of a costume
+sketch — publicity stills, lobby cards, studio photos showing a designer
+holding a sketch — is a photograph, not a sketch; score it
+is_costume_design_sketch: false, however interesting the subject.
+
+NEVER inflate attribution:
 "attributed_artist": "unknown" with well-described signals is a GOOD answer
 and far more useful than a guessed name. attribution_confidence reflects the
 evidence in THESE images, not market hope.
