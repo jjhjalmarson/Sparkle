@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import itertools
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -40,6 +41,67 @@ def make_image_bytes(pattern: str, fmt: str = "PNG", quality: int = 95) -> bytes
     buf = io.BytesIO()
     img.save(buf, format=fmt, quality=quality)
     return buf.getvalue()
+
+
+class _FakeBlock:
+    def __init__(self, text: str):
+        self.text = text
+
+
+class _FakeUsage:
+    def __init__(self, input_tokens: int, output_tokens: int):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+class FakeResponse:
+    def __init__(self, text: str, input_tokens: int = 1000, output_tokens: int = 200):
+        self.content = [_FakeBlock(text)]
+        self.usage = _FakeUsage(input_tokens, output_tokens)
+
+
+class _FakeMessages:
+    def __init__(self, scripted):
+        self._scripted = list(scripted)
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if not self._scripted:
+            raise AssertionError("unexpected Anthropic API call")
+        item = self._scripted.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        if isinstance(item, str):
+            return FakeResponse(item)
+        return item
+
+
+class FakeAnthropic:
+    """Scripted stand-in for anthropic.Anthropic — no live calls in CI.
+    Each scripted item is a response text, a FakeResponse, or an Exception."""
+
+    def __init__(self, scripted=()):
+        self.messages = _FakeMessages(scripted)
+
+    @property
+    def calls(self) -> list[dict]:
+        return self.messages.calls
+
+
+def vision_json(confidence: float = 0.85, artist: str = "Edith Head", **overrides) -> str:
+    data = {
+        "is_costume_design_sketch": True,
+        "confidence": confidence,
+        "attributed_artist": artist,
+        "attribution_confidence": 0.6,
+        "signals": ["signature lower right", "gouache on board"],
+        "era_estimate": "1950s",
+        "red_flags": [],
+        "summary": "Probable original costume design sketch.",
+    }
+    data.update(overrides)
+    return json.dumps(data)
 
 
 _counter = itertools.count(1)

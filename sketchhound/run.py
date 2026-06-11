@@ -18,9 +18,16 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import config, dedup, fetch_ebay, normalize, persist
-from .config import Secrets, Watchlist, load_watchlist
+from . import config, dedup, fetch_ebay, gate, normalize, persist, vision_score
+from .config import ABORT_NEW_SURVIVORS, BACKFILL_VISION_CAP, Secrets, Watchlist, load_watchlist
 from .models import Listing, RunStats
+
+ABORT_BANNER = (
+    "Run aborted before vision scoring: {count} new listings survived the gate "
+    "in one run (limit {limit}). This usually means a filter regression or a "
+    "query flood — review watchlist.yaml. No model spend occurred; the backlog "
+    "will drain once resolved."
+)
 
 
 def fetch_and_dedup(
@@ -66,6 +73,43 @@ def fetch_and_dedup(
     }
 
 
+def gate_and_score(
+    conn,
+    new_by_kind: dict[str, list[Listing]],
+    watchlist: Watchlist,
+    anthropic_client,
+    stats: RunStats,
+    fetch_image=None,
+) -> str | None:
+    """Gate new listings, then vision-score the queue. Returns a feed banner
+    when the abort guard trips, else None.
+
+    Guardrails (brief section 6):
+    - >ABORT_NEW_SURVIVORS new survivors this run → skip vision entirely.
+    - Vision queue = persisted GATE_SURVIVOR rows (this run's survivors plus
+      any backfill backlog), capped at BACKFILL_VISION_CAP per run, drained
+      highest-confidence-gate first.
+    """
+    survivors, rejects = gate.gate(new_by_kind, watchlist, anthropic_client)
+    for listing in (*rejects, *survivors):
+        persist.update_listing(conn, listing)
+
+    if len(survivors) > ABORT_NEW_SURVIVORS:
+        stats.errors.append(f"abort guard: {len(survivors)} new gate survivors")
+        return ABORT_BANNER.format(count=len(survivors), limit=ABORT_NEW_SURVIVORS)
+
+    queue = persist.pending_vision(conn, limit=BACKFILL_VISION_CAP)
+    scored, cost, calls, errors = vision_score.score_batch(
+        queue, anthropic_client, cap=BACKFILL_VISION_CAP, fetch_image=fetch_image
+    )
+    for listing in scored:
+        persist.update_listing(conn, listing)
+    stats.vision_call_count += calls
+    stats.est_cost_usd += cost
+    stats.errors.extend(errors)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m sketchhound.run")
     parser.add_argument("--watchlist", type=Path, default=config.DEFAULT_WATCHLIST)
@@ -90,15 +134,17 @@ def main(argv: list[str] | None = None) -> int:
 
     new_by_kind = fetch_and_dedup(conn, watchlist, secrets, stats, now)
 
+    banner: str | None = None
     if args.skip_vision:
         print("[skip-vision] gate and vision stages skipped")
     else:
-        # Build step 3: gate (negative keywords -> Haiku for artist queries),
-        # then vision on new survivors + drained backlog, capped, with the
-        # >ABORT_NEW_SURVIVORS guard.
-        print("gate/vision not yet implemented (build step 3)")
+        import anthropic
 
-    # Build step 4: publish docs/index.html.  Build step 5: ntfy push.
+        client = anthropic.Anthropic(api_key=secrets.anthropic_api_key)
+        banner = gate_and_score(conn, new_by_kind, watchlist, client, stats)
+
+    # Build step 4: publish docs/index.html (banner included when set).
+    # Build step 5: ntfy push.
 
     stats.finished_at = datetime.now(timezone.utc)
     persist.record_run(conn, stats)
