@@ -17,10 +17,12 @@ EBAY_OAUTH_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 EBAY_BROWSE_SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 BROWSE_SCOPE = "https://api.ebay.com/oauth/api_scope"
 
-# Browse API category IDs to constrain searches where sensible:
+# Browse API category IDs to constrain searches where sensible. The API only
+# accepts ONE category_ids value per request, so each query is searched once
+# per category and merged.
 #   550   = Art
 #   45100 = Entertainment Memorabilia
-SEARCH_CATEGORY_IDS = "550,45100"
+SEARCH_CATEGORY_IDS = ("550", "45100")
 
 TOKEN_CACHE = Path(".ebay_token.json")
 TOKEN_EXPIRY_BUFFER_SECONDS = 120
@@ -58,8 +60,10 @@ def get_app_token(secrets: Secrets, cache_path: Path = TOKEN_CACHE) -> str:
     return payload["access_token"]
 
 
-def search(token: str, query: str, max_results: int = MAX_RESULTS_PER_QUERY) -> list[dict]:
-    """Run one Browse API search, paginating as needed.
+def search_category(
+    token: str, query: str, category_id: str, max_results: int = MAX_RESULTS_PER_QUERY
+) -> list[dict]:
+    """One Browse API search within one category, paginating as needed.
 
     Returns raw item_summary dicts: title, shortDescription, price, buyingOptions,
     itemEndDate, image/additionalImages, itemId, itemWebUrl.
@@ -77,7 +81,7 @@ def search(token: str, query: str, max_results: int = MAX_RESULTS_PER_QUERY) -> 
             headers=headers,
             params={
                 "q": query,
-                "category_ids": SEARCH_CATEGORY_IDS,
+                "category_ids": category_id,
                 "limit": min(PAGE_SIZE, max_results - len(items)),
                 "offset": offset,
             },
@@ -91,6 +95,19 @@ def search(token: str, query: str, max_results: int = MAX_RESULTS_PER_QUERY) -> 
         if "next" not in payload or offset >= payload.get("total", 0):
             break
     return items
+
+
+def search(token: str, query: str, max_results: int = MAX_RESULTS_PER_QUERY) -> list[dict]:
+    """Search one query across all watch categories, merged and deduped by itemId."""
+    seen: set[str] = set()
+    merged: list[dict] = []
+    for category_id in SEARCH_CATEGORY_IDS:
+        for item in search_category(token, query, category_id, max_results):
+            item_id = item.get("itemId")
+            if item_id and item_id not in seen:
+                seen.add(item_id)
+                merged.append(item)
+    return merged
 
 
 def fetch_all(secrets: Secrets, queries: list[str]) -> dict[str, list[dict]]:

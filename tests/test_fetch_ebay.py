@@ -47,7 +47,7 @@ def test_expired_token_refetched(tmp_path):
 
 
 @responses.activate
-def test_search_paginates():
+def test_search_category_paginates():
     page1 = {
         "total": 3,
         "next": "https://api.ebay.com/...&offset=2",
@@ -57,11 +57,29 @@ def test_search_paginates():
     responses.add(responses.GET, fetch_ebay.EBAY_BROWSE_SEARCH_URL, json=page1)
     responses.add(responses.GET, fetch_ebay.EBAY_BROWSE_SEARCH_URL, json=page2)
 
-    items = fetch_ebay.search("tok", "edith head sketch", max_results=10)
+    items = fetch_ebay.search_category("tok", "edith head sketch", "550", max_results=10)
     assert [i["itemId"] for i in items] == ["1", "2", "3"]
     assert len(responses.calls) == 2
     assert responses.calls[0].request.headers["Authorization"] == "Bearer tok"
-    assert "category_ids" in responses.calls[0].request.url
+    assert "category_ids=550" in responses.calls[0].request.url
+
+
+@responses.activate
+def test_search_one_category_per_request_merged_and_deduped():
+    # eBay's Browse API rejects multi-category requests with 400, so search()
+    # must issue one request per category and merge.
+    art = {"total": 2, "itemSummaries": [{"itemId": "1"}, {"itemId": "2"}]}
+    memorabilia = {"total": 2, "itemSummaries": [{"itemId": "2"}, {"itemId": "3"}]}
+    responses.add(responses.GET, fetch_ebay.EBAY_BROWSE_SEARCH_URL, json=art)
+    responses.add(responses.GET, fetch_ebay.EBAY_BROWSE_SEARCH_URL, json=memorabilia)
+
+    items = fetch_ebay.search("tok", "edith head sketch")
+    assert [i["itemId"] for i in items] == ["1", "2", "3"]  # "2" deduped
+    assert len(responses.calls) == len(fetch_ebay.SEARCH_CATEGORY_IDS)
+    requested_categories = [
+        call.request.url.split("category_ids=")[1].split("&")[0] for call in responses.calls
+    ]
+    assert requested_categories == list(fetch_ebay.SEARCH_CATEGORY_IDS)
 
 
 @responses.activate

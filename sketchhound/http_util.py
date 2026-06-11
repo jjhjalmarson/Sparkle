@@ -29,7 +29,12 @@ def request_with_retry(
             last_error = exc
         else:
             if resp.status_code < 500 and resp.status_code != 429:
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    # Include the body — eBay/ntfy 4xx responses say exactly what's wrong.
+                    raise requests.HTTPError(
+                        f"HTTP {resp.status_code} from {url}: {resp.text[:300]}",
+                        response=resp,
+                    )
                 return resp
             last_error = requests.HTTPError(f"HTTP {resp.status_code} from {url}")
         if attempt < retries - 1:
