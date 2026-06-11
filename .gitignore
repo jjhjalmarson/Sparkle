@@ -6,3 +6,4 @@ __pycache__/
 .pytest_cache/
 .env
 .ebay_token.json
+_demo/
