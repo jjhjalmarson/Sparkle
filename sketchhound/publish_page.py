@@ -218,6 +218,8 @@ PAGE_TEMPLATE = Template(
            background: color-mix(in srgb, var(--ink) 10%, transparent); }
   .badge.hot { background: linear-gradient(135deg, var(--pink), var(--orange));
                color: #fff; }
+  .badge.src-ebay { background: var(--blue); color: #fff; }
+  .badge.src-estate { background: var(--orange); color: #fff; }
   .signals { font-size: .8rem; color: var(--muted); margin: 0 0 4px; }
   .stamps { font-size: .75rem; color: var(--muted); margin: 0; }
   footer { margin-top: 36px; font-size: .78rem; color: var(--muted);
@@ -229,7 +231,7 @@ PAGE_TEMPLATE = Template(
 <div class="awning"></div>
 <header>
   <h1>🐕 SketchHound ✨</h1>
-  <p class="tagline">Film costume design sketches, sniffed out hourly on eBay</p>
+  <p class="tagline">Film costume design sketches, sniffed out hourly on eBay &amp; estate sales</p>
 </header>
 
 {% if banner %}<div class="banner">⚠ {{ banner }}</div>{% endif %}
@@ -245,6 +247,11 @@ PAGE_TEMPLATE = Template(
     <option value="">All artists</option>
     {% for artist in artists %}<option value="{{ artist|lower }}">{{ artist }}</option>{% endfor %}
   </select>
+  <select id="source-filter" aria-label="Filter by source">
+    <option value="">All sources</option>
+    <option value="ebay">eBay</option>
+    <option value="estatesales">Estate Sales</option>
+  </select>
 </div>
 
 {% for key, title in section_titles.items() %}
@@ -255,7 +262,8 @@ PAGE_TEMPLATE = Template(
   <article class="card" data-idx="{{ loop.index }}" data-section="{{ key }}"
            data-price="{{ l.price_value if l.price_value is not none else 0 }}"
            data-artist="{{ (l.attributed_artist or 'unknown')|lower }}"
-           data-seen="{{ l.first_seen_at.isoformat() if l.first_seen_at else '' }}">
+           data-seen="{{ l.first_seen_at.isoformat() if l.first_seen_at else '' }}"
+           data-source="{{ l.source }}">
     {% if l.image_urls %}<a class="thumb" href="{{ l.url }}"><img src="{{ l.image_urls[0] }}" alt="" loading="lazy"></a>{% endif %}
     <div class="body">
       <p class="title"><a href="{{ l.url }}">{{ l.title }}</a></p>
@@ -263,7 +271,7 @@ PAGE_TEMPLATE = Template(
         <span class="price">{{ "%.0f"|format(l.price_value) if l.price_value is not none else "?" }} {{ l.price_currency or "" }}</span>
         · {{ "Buy It Now" if l.listing_format and l.listing_format.value == "buy_it_now" else "Auction" }}
         {% if l.end_time %} · ends {{ l.end_time.strftime("%b %d, %H:%M") }} UTC{% endif %}
-        {% if key == "hot" %}<span class="badge hot">✨ HOT</span>{% endif %}
+        <span class="badge src-{{ 'estate' if l.source == 'estatesales' else 'ebay' }}">{{ "Estate Sale" if l.source == "estatesales" else "eBay" }}</span>{% if key == "hot" %}<span class="badge hot">✨ HOT</span>{% endif %}
       </p>
       <p class="meta">
         Sketch confidence {{ "%.0f%%"|format(l.confidence * 100) }}
@@ -296,6 +304,7 @@ PAGE_TEMPLATE = Template(
   controls.hidden = false;
   var sortEl = document.getElementById('sort');
   var artistEl = document.getElementById('artist-filter');
+  var sourceEl = document.getElementById('source-filter');
 
   var sectionEls = {};
   document.querySelectorAll('section').forEach(function (s) {
@@ -320,9 +329,12 @@ PAGE_TEMPLATE = Template(
 
   function apply() {
     var artist = artistEl.value;
+    var source = sourceEl.value;
     var mode = sortEl.value;
     allCards.forEach(function (card) {
-      card.style.display = (!artist || card.dataset.artist === artist) ? '' : 'none';
+      var show = (!artist || card.dataset.artist === artist)
+              && (!source || card.dataset.source === source);
+      card.style.display = show ? '' : 'none';
     });
     if (mode === 'default') {
       // Restore the curated sections in their original order.
@@ -345,6 +357,7 @@ PAGE_TEMPLATE = Template(
 
   sortEl.addEventListener('change', apply);
   artistEl.addEventListener('change', apply);
+  sourceEl.addEventListener('change', apply);
 })();
 </script>
 </body>
