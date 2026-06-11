@@ -124,8 +124,10 @@ def test_backfill_cap_drains_over_runs(conn):
     assert len(persist.pending_vision(conn, limit=backlog)) == 10  # drains next run
 
 
-def test_abort_guard_skips_vision_entirely(conn):
-    """Acceptance: >ABORT_NEW_SURVIVORS new survivors → no vision calls, banner."""
+def test_abort_guard_skips_vision_in_steady_state(conn):
+    """Acceptance: >ABORT_NEW_SURVIVORS new survivors → no vision calls, banner.
+    Steady state = at least one vision call has happened in some prior run."""
+    persist.record_run(conn, RunStats(started_at=NOW, finished_at=NOW, vision_call_count=5))
     flood = [
         persisted(conn, make_listing(title="untitled gouache"), stage=Stage.FETCHED)
         for _ in range(ABORT_NEW_SURVIVORS + 1)
@@ -142,3 +144,22 @@ def test_abort_guard_skips_vision_entirely(conn):
     assert stats.vision_call_count == 0
     # Survivors are persisted and will drain through the cap once resolved.
     assert len(persist.pending_vision(conn, limit=200)) == ABORT_NEW_SURVIVORS + 1
+
+
+def test_first_run_flood_is_backfill_not_abort(conn):
+    """The initial backfill IS a flood — the guard must stand down until the
+    first vision batch has run, and the 150 cap does the cost control."""
+    flood = [
+        persisted(conn, make_listing(title="untitled gouache"), stage=Stage.FETCHED)
+        for _ in range(ABORT_NEW_SURVIVORS + 50)
+    ]
+    client = FakeAnthropic([vision_json()] * BACKFILL_VISION_CAP)
+
+    stats = RunStats(started_at=NOW)
+    banner = gate_and_score(
+        conn, {"artist": [], "generic": flood}, Watchlist(), client, stats, fetch_image=fetch_image
+    )
+
+    assert banner is None
+    assert stats.vision_call_count == BACKFILL_VISION_CAP
+    assert len(persist.pending_vision(conn, limit=500)) == len(flood) - BACKFILL_VISION_CAP

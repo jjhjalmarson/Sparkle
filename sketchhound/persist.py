@@ -274,6 +274,12 @@ def last_run(conn: sqlite3.Connection) -> RunStats | None:
     )
 
 
+def total_vision_calls(conn: sqlite3.Connection) -> int:
+    """Vision calls across all runs ever. Zero → still in initial backfill."""
+    row = conn.execute("SELECT COALESCE(SUM(vision_call_count), 0) FROM runs").fetchone()
+    return int(row[0])
+
+
 def month_spend_usd(conn: sqlite3.Connection, now: datetime) -> float:
     """Sum est_cost_usd over runs in `now`'s calendar month — feed footer."""
     prefix = now.strftime("%Y-%m")

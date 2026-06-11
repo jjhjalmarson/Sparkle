@@ -86,6 +86,9 @@ def gate_and_score(
 
     Guardrails (brief section 6):
     - >ABORT_NEW_SURVIVORS new survivors this run → skip vision entirely.
+      The guard is STEADY-STATE only: until the first vision batch has ever
+      run (total vision calls == 0) the system is in initial backfill, where
+      a flood is expected and the per-run cap is the cost control.
     - Vision queue = persisted GATE_SURVIVOR rows (this run's survivors plus
       any backfill backlog), capped at BACKFILL_VISION_CAP per run, drained
       highest-confidence-gate first.
@@ -94,7 +97,8 @@ def gate_and_score(
     for listing in (*rejects, *survivors):
         persist.update_listing(conn, listing)
 
-    if len(survivors) > ABORT_NEW_SURVIVORS:
+    steady_state = persist.total_vision_calls(conn) > 0
+    if steady_state and len(survivors) > ABORT_NEW_SURVIVORS:
         stats.errors.append(f"abort guard: {len(survivors)} new gate survivors")
         return ABORT_BANNER.format(count=len(survivors), limit=ABORT_NEW_SURVIVORS)
 
