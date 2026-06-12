@@ -1,7 +1,7 @@
 """eBay Browse API client. Application-level OAuth (client-credentials flow),
 token cached to .ebay_token.json (gitignored). All HTTP retried 3x with
-exponential backoff. Free tier: 5k calls/day — hourly runs over ~13 queries
-use a small fraction of that.
+exponential backoff. Free tier: 5k calls/day — a daily run over ~13 queries
+uses a tiny fraction of that.
 """
 
 from __future__ import annotations

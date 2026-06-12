@@ -8,7 +8,7 @@
    it twice), and let publish suppress it unless price dropped >20%.
 
 Vision is only ever invoked on listings that clear BOTH layers — this is the
-hard requirement that makes hourly cadence cheap.
+hard requirement that keeps recurring runs cheap.
 """
 
 from __future__ import annotations

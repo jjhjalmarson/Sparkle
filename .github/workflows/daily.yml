@@ -1,9 +1,9 @@
-name: SketchHound hourly run
+name: SketchHound daily run
 
 # yamllint disable-line — touched to force GitHub Actions to (re)register this workflow
 on:
   schedule:
-    - cron: "7 * * * *" # offset from :00 — top-of-hour cron slots are congested and get delayed
+    - cron: "7 13 * * *" # daily 13:07 UTC (morning US Central) — offset from :00 since top-of-hour cron slots are congested and get delayed
   workflow_dispatch: {}
 
 permissions:
@@ -51,7 +51,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "no changes to commit"
           else
-            git commit -m "Hourly run $(date -u +'%Y-%m-%d %H:%M') UTC"
+            git commit -m "Daily run $(date -u +'%Y-%m-%d %H:%M') UTC"
             git pull --rebase
             git push
           fi

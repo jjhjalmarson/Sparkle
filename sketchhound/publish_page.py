@@ -231,7 +231,7 @@ PAGE_TEMPLATE = Template(
 <div class="awning"></div>
 <header>
   <h1>🐕 SketchHound ✨</h1>
-  <p class="tagline">Film costume design sketches, sniffed out hourly on eBay &amp; estate sales</p>
+  <p class="tagline">Film costume design sketches, sniffed out daily on eBay &amp; estate sales</p>
 </header>
 
 {% if banner %}<div class="banner">⚠ {{ banner }}</div>{% endif %}

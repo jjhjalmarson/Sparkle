@@ -53,7 +53,7 @@
 {% if not has_data %}
 <div class="no-data">
   <p style="font-size:1.1rem;">No pipeline data yet.</p>
-  <p>The hourly eBay scan hasn't produced results yet, or the database hasn't been committed.</p>
+  <p>The daily eBay scan hasn't produced results yet, or the database hasn't been committed.</p>
 </div>
 {% else %}
 
@@ -137,6 +137,6 @@
 </section>
 {% endif %}
 
-<p class="updated">Data as of last deploy &middot; refreshes with each hourly pipeline run</p>
+<p class="updated">Data as of last deploy &middot; refreshes with each daily pipeline run</p>
 {% endif %}
 {% endblock %}

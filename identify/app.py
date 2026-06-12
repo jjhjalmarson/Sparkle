@@ -1,7 +1,7 @@
 """SketchHound — Identify (provenance analysis) + Dashboard (pipeline stats).
 
 Deployed on Render (free tier, ephemeral). Reads the pipeline DB from the
-repo checkout (refreshed each hourly Actions commit → Render auto-deploy).
+repo checkout (refreshed each daily Actions commit → Render auto-deploy).
 """
 
 from __future__ import annotations
@@ -360,7 +360,7 @@ DB_CACHE_TTL_SECONDS = 600
 
 
 def _freshest_db() -> Path | None:
-    """The hourly pipeline commits a new DB to GitHub, but this service only
+    """The daily pipeline commits a new DB to GitHub, but this service only
     gets a fresh checkout on deploy. Pull from GitHub raw (10-min cache) so
     the dashboard stays current without redeploying; fall back to the
     checkout copy, then to nothing."""

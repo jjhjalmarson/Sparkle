@@ -1,6 +1,6 @@
 # 🐕 SketchHound
 
-Hourly agent that hunts eBay for original film/TV costume design sketches
+Daily agent that hunts eBay for original film/TV costume design sketches
 (Edith Head, Bob Mackie, Travilla, …) — including badly-listed sleepers — and
 publishes a static feed page to GitHub Pages, with ntfy.sh push alerts for hot
 Buy-It-Now finds. Full spec: [BUILD_BRIEF.md](BUILD_BRIEF.md).
@@ -21,9 +21,10 @@ Buy-It-Now finds. Full spec: [BUILD_BRIEF.md](BUILD_BRIEF.md).
    `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` (your eBay app keys) and
    `ANTHROPIC_API_KEY` (his key).
 3. **Settings → Pages**: deploy from branch, `master` + `/docs`.
-4. **Actions tab**: run "SketchHound hourly run" once manually
+4. **Actions tab**: run "SketchHound daily run" once manually
    (`workflow_dispatch`). The first run backfills — vision is capped at 150
-   listings per run, so the backlog drains over the next few hours.
+   listings per run, so the backlog drains over the next few runs (trigger
+   extra manual runs to drain it faster).
 5. Replace the `ntfy_topic` in `watchlist.yaml` if you want a fresh random
    string, and have him subscribe before the first run.
 
@@ -39,11 +40,11 @@ $env:EBAY_CLIENT_ID = "..."; $env:EBAY_CLIENT_SECRET = "..."
 
 `python -m sketchhound.run` (with `ANTHROPIC_API_KEY` also set) runs the full
 pipeline: fetch → normalize → dedup → gate → vision → persist → publish → push.
-State is `data/sketchhound.db` (SQLite, committed by the hourly workflow), the
+State is `data/sketchhound.db` (SQLite, committed by the daily workflow), the
 page is `docs/index.html`.
 
 ## Cost model
 
 The only real spend is Sonnet vision calls on **new listings that survive
-gating** — steady-state that's a handful per hour. Haiku triage costs are
+gating** — steady-state that's a handful per day. Haiku triage costs are
 negligible. The feed footer shows estimated model spend this month.
